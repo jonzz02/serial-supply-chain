@@ -147,6 +147,38 @@ results/
 - `--rounds`: Training rounds (default: 365)
 - `--warmup`: Warmup rounds excluded from metrics (default: 50)
 
+## Setup
+
+### Prerequisites
+
+- Python 3.7 or higher
+- pip (Python package installer)
+
+### Installation
+
+1. **Create a virtual environment** (recommended):
+   ```bash
+   python -m venv venv
+   
+   # On Windows
+   venv\Scripts\activate
+   
+   # On Linux/Mac
+   source venv/bin/activate
+   ```
+
+2. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+### Verify Installation
+
+You can verify the installation by running a quick test:
+```bash
+python run_experiments.py --n_seeds 5 --rounds 100
+```
+
 ## Quick Start
 
 ```bash
