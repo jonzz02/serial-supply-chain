@@ -7,10 +7,10 @@ import numpy as np
 class ExperimentConfig:
     
     # Cost structure
-    h1: float = 0.5
-    h2: float = 0.5
+    h1: float = 2
+    h2: float = 1
     p_bo: float = 5.0
-    alpha: float = 0.5
+    alpha: float = 0.6
     
     # Demand
     lam: float = 20.0

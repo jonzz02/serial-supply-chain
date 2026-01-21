@@ -259,9 +259,10 @@ def run_robustness_scenarios(
     scenarios = {
         "baseline": {},
         "high_backorder": {"p_bo": 10.0},
-        "low_demand": {"lam": 10.0},
-        "high_demand": {"lam": 30.0},
-        "asymmetric_alpha": {"alpha": 0.3},
+        "low_demand_uncertainty": {"lam": 10.0},  # Increased demand uncertainty (higher λ)
+        "high_demand_uncertainty": {"lam": 40.0},  # Increased demand uncertainty (higher λ)
+        "high_h1_h2_ratio": {"h1": 2.0, "h2": 0.5},  # h1 >> h2: retailer holding cost much higher
+        "high_alpha": {"alpha": 0.8},  # α > 0.5: more cost allocated to retailer
     }
     
     all_summaries = []
