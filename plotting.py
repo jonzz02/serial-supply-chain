@@ -113,28 +113,41 @@ def plot_all_learning_curves_comparison(
     output_dir: str,
     warmup: int = 0,
 ):
+    """Plot learning curves in 5 subplots - one per retailer algorithm."""
     set_style()
     
-    fig, ax = plt.subplots(figsize=(12, 7))
-    colors = plt.cm.tab10(np.linspace(0, 1, len(treatments)))
+    retailer_algos = ["greedy", "ucb", "thompson", "exp3", "etc"]
+    supplier_algos = ["greedy", "ucb", "thompson", "exp3", "etc"]
+    colors = plt.cm.tab10(np.linspace(0, 1, len(supplier_algos)))
     
-    for treatment, color in zip(treatments, colors):
-        name = treatment.name
-        ts_data = [t for t in timeseries if t["treatment"] == name]
-        if not ts_data:
-            continue
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+    axes = axes.flatten()
+    
+    for idx, ret_algo in enumerate(retailer_algos):
+        ax = axes[idx]
         
-        costs = np.array([t["total_costs"] for t in ts_data])
-        rounds = np.arange(warmup + 1, warmup + costs.shape[1] + 1)
-        mean_cost = np.mean(costs, axis=0)
+        for sup_algo, color in zip(supplier_algos, colors):
+            name = f"{ret_algo}_{sup_algo}_s0-60-1"
+            ts_data = [t for t in timeseries if t["treatment"] == name]
+            if not ts_data:
+                continue
+            
+            costs = np.array([t["total_costs"] for t in ts_data])
+            rounds = np.arange(warmup + 1, warmup + costs.shape[1] + 1)
+            mean_cost = np.mean(costs, axis=0)
+            
+            ax.plot(rounds, mean_cost, color=color, label=f"vs {sup_algo}", linewidth=1.8)
         
-        ax.plot(rounds, mean_cost, color=color, label=name)
+        ax.set_xlabel("Round", fontsize=10)
+        ax.set_ylabel("Mean Total Cost (€)", fontsize=10)
+        ax.set_title(f"Retailer: {ret_algo.upper()}", fontsize=11, fontweight="bold")
+        ax.legend(loc="upper right", fontsize=8, framealpha=0.9)
+        ax.grid(True, alpha=0.3)
     
-    ax.set_xlabel("Round")
-    ax.set_ylabel("Mean Total Cost (€)")
-    ax.set_title("Learning Curves Comparison")
-    ax.legend(loc="upper right", fontsize=9)
+    # Hide last subplot (we only have 5 algorithms, not 6)
+    axes[-1].axis('off')
     
+    fig.suptitle("Learning Curves by Retailer Algorithm", fontsize=14, fontweight="bold", y=0.995)
     fig.tight_layout()
     fig.savefig(os.path.join(output_dir, "learning_curves_all.png"), dpi=150)
     plt.close(fig)
