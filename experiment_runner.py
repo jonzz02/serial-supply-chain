@@ -33,7 +33,10 @@ class TreatmentConfig:
         return (self.agent_retailer, self.agent_supplier)
 
 
-# Default treatment grid (simplified for student scope)
+# All available agent types
+AVAILABLE_AGENTS = ["greedy", "ucb", "thompson", "exp3", "etc"]
+
+# Default treatment grid (subset for quick experiments)
 DEFAULT_AGENT_PAIRS = [
     ("greedy", "greedy"),
     ("ucb", "ucb"),
@@ -48,13 +51,37 @@ DEFAULT_ACTION_GRID = (0, 60, 1)
 DEFAULT_INIT_MODE = "random"
 
 
+def create_full_algorithm_grid() -> List[Tuple[str, str]]:
+    """Create full 5×5 algorithm grid (25 treatments).
+    
+    Returns all combinations of retailer × supplier agent types:
+    - greedy, ucb, thompson, exp3, etc
+    """
+    return list(product(AVAILABLE_AGENTS, AVAILABLE_AGENTS))
+
+
 def create_treatment_grid(
     agent_pairs: List[Tuple[str, str]] = None,
     action_grid: Tuple[int, int, int] = None,
     init_mode: str = None,
+    full_grid: bool = False,
 ) -> List[TreatmentConfig]:
-    """Create treatment grid (agents × single grid × single init mode)."""
-    pairs = agent_pairs or DEFAULT_AGENT_PAIRS
+    """Create treatment grid (agents × single grid × single init mode).
+    
+    Args:
+        agent_pairs: List of (retailer, supplier) agent type tuples.
+        action_grid: Tuple of (lower, upper, step) for action space.
+        init_mode: "random" or "benchmark" initialization.
+        full_grid: If True, use full 5×5 algorithm grid (25 treatments).
+                   Overrides agent_pairs if True.
+    
+    Returns:
+        List of TreatmentConfig objects.
+    """
+    if full_grid:
+        pairs = create_full_algorithm_grid()
+    else:
+        pairs = agent_pairs or DEFAULT_AGENT_PAIRS
     grid = action_grid or DEFAULT_ACTION_GRID
     init = init_mode or DEFAULT_INIT_MODE
     

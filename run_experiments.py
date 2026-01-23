@@ -26,8 +26,8 @@ def main():
         warmup=args.warmup,
     )
     
-    # Create treatments (simplified: 4 agent pairs, 1 grid, random init only)
-    treatments = create_treatment_grid()
+    # Create treatments (full 5×5 grid: 25 treatments)
+    treatments = create_treatment_grid(full_grid=True)
     seeds = list(range(args.n_seeds))
     output_dir = "results"
     

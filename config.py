@@ -24,6 +24,12 @@ class ExperimentConfig:
     eps_start: float = 0.8
     eps_end: float = 0.05
     
+    # Exp3 parameters
+    exp3_gamma: float = 0.1  # Exploration parameter γ ∈ (0, 1]
+    
+    # ETC (Explore-Then-Commit) parameters
+    etc_explore_rounds: int = 3  # Number of exploration rounds per arm
+    
     # Simulation
     rounds: int = 365
     warmup: int = 50  # Rounds excluded from metrics (transient)

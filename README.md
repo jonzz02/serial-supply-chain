@@ -48,7 +48,9 @@ Implemented bandit policies:
 - **ε-greedy** (`greedy`): explores with probability ε (decaying linearly from 0.8 to 0.05 over training rounds), otherwise exploits best estimated arm
 - **UCB1** (`ucb`): selects arm maximizing  
   \( \hat{\mu}(a) + \sqrt{2 \log(t+1)/n(a)} \)
-- **Thompson Sampling** (implemented but not included in default treatment grid)
+- **Thompson Sampling** (`thompson`): Bayesian approach using Normal-Inverse-Gamma conjugate prior; samples from posterior and selects arm with highest sampled mean
+- **Exp3** (`exp3`): Exponential-weight algorithm for Exploration and Exploitation; uses probability distribution \((1-\gamma) \cdot w_i/\sum w + \gamma/K\) with importance-weighted updates (default: \(\gamma = 0.1\))
+- **ETC** (`etc`): Explore-Then-Commit; systematically explores each arm \(m\) times (default: \(m = 3\)), then commits to best-performing arm
 
 **Epsilon decay schedule (for ε-greedy):**
 - \( \epsilon_{\text{start}} = 0.8 \): initial exploration rate
@@ -56,20 +58,19 @@ Implemented bandit policies:
 - Linear decay: \( \epsilon_t = (1 - t/T) \cdot 0.8 + (t/T) \cdot 0.05 \), where \( T \) is total training rounds
 
 
-## Treatments (Student Scope)
+## Treatments
 
-We run **4 agent pair configurations** on **one action grid**:
+We run **25 agent pair configurations** (full 5×5 grid) on **one action grid**:
 
-| Retailer | Supplier | Treatment Name |
-|---------:|---------:|----------------|
-| greedy   | greedy   | `greedy_greedy_s0-60-1` |
-| ucb      | ucb      | `ucb_ucb_s0-60-1` |
-| greedy   | ucb      | `greedy_ucb_s0-60-1` |
-| ucb      | greedy   | `ucb_greedy_s0-60-1` |
+**Agent types:** `greedy`, `ucb`, `thompson`, `exp3`, `etc`
 
 **Action grid:** \( s \in \{0,1,\dots,60\} \) (61 actions)
 
-This setup intentionally includes **asymmetric pairs** to study coordination/frictions when only one stage uses a “stronger” algorithm.
+All combinations of (Retailer × Supplier) are tested, including:
+- **Symmetric pairs:** both agents use the same algorithm (e.g., `greedy_greedy`, `ucb_ucb`)
+- **Asymmetric pairs:** agents use different algorithms (e.g., `greedy_ucb`, `exp3_thompson`)
+
+This setup studies coordination/frictions when stages use different learning algorithms and compares algorithm performance across symmetric and asymmetric configurations.
 
 
 ## Warmup-Aware Evaluation

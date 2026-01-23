@@ -152,11 +152,150 @@ class ThompsonAgent(Agent):
         self.beta_param[a_idx] = beta_new
 
 
+class Exp3Agent(Agent):
+    """Exp3 (Exponential-weight algorithm for Exploration and Exploitation).
+    
+    Uses exponential weights with exploration parameter γ (gamma).
+    Suitable for adversarial bandit settings but also works in stochastic environments.
+    """
+
+    def __init__(self, model, role: str):
+        super().__init__(model)
+        self.role = role
+        
+        cfg = model.config
+        self.action_space = cfg.action_space()
+        self.n_actions = len(self.action_space)
+        
+        # Exploration parameter γ ∈ (0, 1]
+        self.gamma = cfg.exp3_gamma
+        
+        # Exponential weights (initialized to 1)
+        self.weights = np.ones(self.n_actions, dtype=float)
+        
+        # Track probabilities for importance weighting
+        self._probs = np.ones(self.n_actions) / self.n_actions
+        
+        self.action_idx = None
+        self.action = None
+        self.reward = 0.0
+        self.reward_cum = 0.0
+
+    def select_action(self):
+        """Select action using Exp3 probability distribution."""
+        # Compute probabilities: (1-γ) * w_i/sum(w) + γ/K
+        weight_sum = self.weights.sum()
+        exploitation = (1 - self.gamma) * (self.weights / weight_sum)
+        exploration = self.gamma / self.n_actions
+        self._probs = exploitation + exploration
+        
+        # Sample action according to probabilities
+        action_idx = self.random.choices(
+            range(self.n_actions), 
+            weights=self._probs.tolist()
+        )[0]
+        
+        self.action_idx = action_idx
+        self.action = int(self.action_space[action_idx])
+
+    def update_belief(self):
+        """Update weights using importance-weighted rewards."""
+        a_idx = self.action_idx
+        r = float(self.model.rewards[self])
+        
+        # Importance-weighted reward estimate (scaled to [0,1] range assumed)
+        # For costs (negative), we negate to make higher = better
+        r_scaled = -r  # Convert cost to reward (higher is better)
+        
+        # Normalize to approximate [0,1] range for stability
+        # Using a reasonable cost range estimate
+        r_normalized = np.clip(r_scaled / 100.0 + 0.5, 0, 1)
+        
+        # Importance-weighted estimate
+        r_hat = r_normalized / self._probs[a_idx]
+        
+        # Update weight: w_i = w_i * exp(γ * r_hat / K)
+        self.weights[a_idx] *= np.exp(self.gamma * r_hat / self.n_actions)
+        
+        # Prevent numerical overflow by normalizing weights periodically
+        if self.weights.max() > 1e10:
+            self.weights /= self.weights.max()
+
+
+class EtcAgent(Agent):
+    """Explore-Then-Commit (ETC) bandit agent.
+    
+    Explores each arm a fixed number of times, then commits to the best arm
+    (highest average reward) for the remaining rounds.
+    """
+
+    def __init__(self, model, role: str):
+        super().__init__(model)
+        self.role = role
+        
+        cfg = model.config
+        self.action_space = cfg.action_space()
+        self.n_actions = len(self.action_space)
+        
+        # Number of exploration rounds per arm
+        self.explore_rounds_per_arm = cfg.etc_explore_rounds
+        
+        # Bandit stats
+        self.counts = np.zeros(self.n_actions, dtype=int)
+        self.average_reward = np.zeros(self.n_actions, dtype=float)
+        
+        # Committed arm (None during exploration)
+        self.committed_arm = None
+        
+        # Track which arms still need exploration
+        self._exploration_order = list(range(self.n_actions))
+        self.random.shuffle(self._exploration_order)
+        self._current_explore_idx = 0
+        
+        self.action_idx = None
+        self.action = None
+        self.reward = 0.0
+        self.reward_cum = 0.0
+
+    def select_action(self):
+        """Select action: explore systematically, then commit."""
+        if self.committed_arm is not None:
+            # Exploitation phase: always play committed arm
+            action_idx = self.committed_arm
+        else:
+            # Exploration phase: cycle through arms
+            # Find next arm that hasn't been fully explored
+            while self._current_explore_idx < len(self._exploration_order):
+                arm = self._exploration_order[self._current_explore_idx]
+                if self.counts[arm] < self.explore_rounds_per_arm:
+                    action_idx = arm
+                    break
+                self._current_explore_idx += 1
+            else:
+                # All arms explored - commit to best
+                self.committed_arm = int(np.argmax(self.average_reward))
+                action_idx = self.committed_arm
+        
+        self.action_idx = action_idx
+        self.action = int(self.action_space[action_idx])
+
+    def update_belief(self):
+        """Update average reward for played arm."""
+        a_idx = self.action_idx
+        r = float(self.model.rewards[self])
+        
+        n = self.counts[a_idx] + 1
+        self.counts[a_idx] = n
+        self.average_reward[a_idx] += (r - self.average_reward[a_idx]) / n
+
+
 # Agent factory
 AGENT_CLASSES = {
     "greedy": GreedyAgent,
     "ucb": UcbAgent,
     "thompson": ThompsonAgent,
+    "exp3": Exp3Agent,
+    "etc": EtcAgent,
 }
 
 
@@ -179,7 +318,7 @@ def initialize_agent_benchmark(agent, opt_action: int, prior_reward: float, prio
     
     idx = action_space.index(opt_action)
     
-    if isinstance(agent, (GreedyAgent, UcbAgent)):
+    if isinstance(agent, (GreedyAgent, UcbAgent, EtcAgent)):
         agent.counts[idx] = prior_strength
         agent.average_reward[idx] = prior_reward
         if isinstance(agent, UcbAgent):
@@ -190,3 +329,6 @@ def initialize_agent_benchmark(agent, opt_action: int, prior_reward: float, prio
         agent.kappa[idx] = prior_strength
         agent.alpha_param[idx] = prior_strength / 2
         agent.beta_param[idx] = prior_strength / 2
+    elif isinstance(agent, Exp3Agent):
+        # Boost weight of optimal arm
+        agent.weights[idx] = np.exp(prior_strength)
