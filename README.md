@@ -1,152 +1,14 @@
-# Two-Stage Serial Supply Chain Simulation (Project 2.1)
+# Serial Supply Chain Coordination Simulation
 
-This repository studies **convergence behavior under different agent configurations** in a **two-stage serial supply chain** where both stages learn **base-stock levels** via multi-armed bandits.
+Mesa-based simulation of a 2-stage serial supply chain where bandit agents (retailer stage 1, supplier stage 2) learn discrete base-stock levels.
 
-The main question: Do the agents converge, how fast, and to which outcomes when we change the learning algorithms (and allow asymmetric pairs)?
+## Project Scope Questions
 
-
-## Model Overview
-
-### Supply Chain Structure
-- **Retailer (Stage 1)** faces stochastic end-customer demand:  
-  \( D_t \sim \text{Poisson}(\lambda) \), i.i.d. over time
-- **Supplier (Stage 2)** fulfills retailer orders; upstream source is assumed unconstrained
-- **Lead times:** \( L_1 = L_2 = 1 \)
-- Each agent independently chooses a **local base-stock level** \( s \) from a discrete action grid.
-
-### Within-Period Dynamics (per round)
-1. **Arrivals:** shipments from last round arrive
-2. **Decisions:** retailer chooses \( s_1 \), supplier chooses \( s_2 \)
-3. **Shipping:** supplier ships available inventory to retailer
-4. **Demand:** customer demand realizes at retailer
-5. **Costs:** holding and backorder costs are charged; agents observe reward = negative cost
-
-### Cost Structure (per period)
-- Retailer cost:
-  \[
-  (h_1 + h_2)\,I_1 + \alpha\,p_{bo}\,B_1
-  \]
-- Supplier cost:
-  \[
-  h_2\,(I_2 + U_1) + (1-\alpha)\,p_{bo}\,B_1
-  \]
-Where:
-- \( I \) = on-hand inventory, \( B \) = backorders, \( U \) = in-transit
-
-**Default parameters:**
-- \( h_1 = 0.5 \), \( h_2 = 0.5 \): holding costs
-- \( p_{bo} = 5.0 \): backorder penalty
-- \( \alpha = 0.5 \): backorder cost allocation (50% retailer, 50% supplier)
-- \( \lambda = 20.0 \): Poisson demand rate
-
-**Reward signal:** each agent receives **negative local cost**.
-
-
-## Learning Agents
-
-Implemented bandit policies:
-- **ε-greedy** (`greedy`): explores with probability ε (decaying linearly from 0.8 to 0.05 over training rounds), otherwise exploits best estimated arm
-- **UCB1** (`ucb`): selects arm maximizing  
-  \( \hat{\mu}(a) + \sqrt{2 \log(t+1)/n(a)} \)
-- **Thompson Sampling** (`thompson`): Bayesian approach using Normal-Inverse-Gamma conjugate prior; samples from posterior and selects arm with highest sampled mean
-- **Exp3** (`exp3`): Exponential-weight algorithm for Exploration and Exploitation; uses probability distribution \((1-\gamma) \cdot w_i/\sum w + \gamma/K\) with importance-weighted updates (default: \(\gamma = 0.1\))
-- **ETC** (`etc`): Explore-Then-Commit; systematically explores each arm \(m\) times (default: \(m = 3\)), then commits to best-performing arm
-
-**Epsilon decay schedule (for ε-greedy):**
-- \( \epsilon_{\text{start}} = 0.8 \): initial exploration rate
-- \( \epsilon_{\text{end}} = 0.05 \): final exploration rate
-- Linear decay: \( \epsilon_t = (1 - t/T) \cdot 0.8 + (t/T) \cdot 0.05 \), where \( T \) is total training rounds
-
-
-## Treatments
-
-We run **25 agent pair configurations** (full 5×5 grid) on **one action grid**:
-
-**Agent types:** `greedy`, `ucb`, `thompson`, `exp3`, `etc`
-
-**Action grid:** \( s \in \{0,1,\dots,60\} \) (61 actions)
-
-All combinations of (Retailer × Supplier) are tested, including:
-- **Symmetric pairs:** both agents use the same algorithm (e.g., `greedy_greedy`, `ucb_ucb`)
-- **Asymmetric pairs:** agents use different algorithms (e.g., `greedy_ucb`, `exp3_thompson`)
-
-This setup studies coordination/frictions when stages use different learning algorithms and compares algorithm performance across symmetric and asymmetric configurations.
-
-
-## Warmup-Aware Evaluation
-
-All reported metrics and plots **exclude the first `warmup` rounds** (default: 50).  
-Reason: early rounds contain transient pipeline/initialization effects and distort steady-state learning comparisons.
-
-Formally, metrics are computed on rounds:
-\[
-t \in [\text{warmup},\ \text{rounds})
-\]
-
-
-## Benchmark (System Optimum)
-
-We compute a **system-optimal benchmark** by enumerating all pairs \((s_1, s_2)\) on the action grid and estimating long-run average total cost via Monte Carlo:
-
-- \( (s_1^\*, s_2^\*) \): best pair on the grid
-- \( c^\* \): estimated expected total cost under \((s_1^\*, s_2^\*)\)
-
-**Benchmark estimation parameters:**
-- `benchmark_rounds = 1500`: simulation length per policy evaluation
-- `benchmark_warmup = 300`: warmup rounds excluded from benchmark cost estimation
-- `benchmark_n_seeds = 3`: number of random seeds averaged for robustness
-
-This benchmark is used to compute **regret** and is cached for efficiency.
-
-
-## Metrics
-
-### Convergence
-- **Converged:** in the last \(W\) rounds (convergence window, default \(W=50\)), the most frequent action occurs with share ≥ 90%
-- **Convergence time:** first round index (absolute time) from which the convergence condition holds until the end
-- **Volatility:** fraction of action changes (post-warmup)
-
-**Note:** The convergence window (\(W=50\)) is a separate parameter from the warmup period. Convergence is evaluated on post-warmup data using a sliding window.
-
-### Regret
-- Per-round regret (post-warmup):
-  \[
-  \text{regret}_t = \text{total\_cost}_t - c^\*
-  \]
-- **Cumulative regret (post-warmup):** cumulative sum of per-round regret
-- **train_total_regret:** total post-warmup regret over the training horizon
-
-> Note: In multi-agent learning, theoretical regret guarantees generally do not apply because each agent faces a **non-stationary environment** (the other agent is learning). We therefore use regret mainly as a **relative performance** measure across treatments, and convergence metrics to assess stabilization.
-
-### Aggregation Across Seeds
-For each treatment and metric we report: **mean**, **std**, **min**, **max** over random seeds.
-
-
-## RNG Design (Fair Comparisons)
-
-To enable fair comparisons across treatments:
-- **`demand_rng` (seed)** generates the demand sequence.  
-  For the same seed, **all treatments see the exact same demand draws** (common random numbers).
-- **Algorithm randomness** (exploration, Thompson sampling) may differ across algorithms and is intended.
-
-
-## Output
-
-```
-results/
-├── summary.csv  # one row per treatment: aggregated metrics (mean/std/min/max)
-├── runs.csv     # one row per (treatment, seed): individual run metrics
-└── figures/
-    ├── learning_curves_all.png      # mean total cost over time (all treatments overlaid, post-warmup)
-    ├── regret_comparison.png        # bar chart of post-warmup total regret by treatment
-    └── convergence_comparison.png   # convergence rates + convergence times by treatment
-```
-
-## CLI Options
-
-- `--n_seeds`: Number of random seeds (default: 50)
-- `--rounds`: Training rounds (default: 365)
-- `--warmup`: Warmup rounds excluded from metrics (default: 50)
+This codebase addresses the "Supply Chain Coordination" project:
+- **Do agents converge?** Track `both_convergence_rate` and per-agent convergence metrics
+- **How fast do they converge?** Track `s1_conv_time`, `s2_conv_time` (absolute round indices)
+- **To what solutions?** Compare against Nash equilibria (`converged_to_ne`) and centralized optimum (`converged_to_central`)
+- **Which mechanisms influence convergence?** Reward design, prior knowledge, initialization, action grid design, utility functions
 
 ## Setup
 
@@ -177,64 +39,142 @@ results/
 
 You can verify the installation by running a quick test:
 ```bash
-python run_experiments.py --n_seeds 5 --rounds 100
+python run_experiments.py --scenario baseline --n_actions 61 --n_seeds 5 --rounds 100 --warmup 20 --output_dir results/
 ```
 
 ## Quick Start
 
 ```bash
-# Run default experiment (50 seeds, 365 rounds, 50 warmup)
-python run_experiments.py
+# Run full 5×5 algorithm grid for baseline scenario
+python run_experiments.py --scenario baseline --n_actions 61 --full_grid --n_seeds 50 --rounds 365 --warmup 50 --output_dir results/
 
-# Quick test (5 seeds, 100 rounds)
-python run_experiments.py --n_seeds 5 --rounds 100
+# Run subset grid (default 4 pairs) for global reward scenario
+python run_experiments.py --scenario global_reward --n_actions 61 --n_seeds 30 --rounds 365 --warmup 50 --output_dir results/
 
-# Full experiment with custom warmup
-python run_experiments.py --n_seeds 100 --warmup 100
+# Run with benchmark initialization
+python run_experiments.py --scenario benchmark_init --n_actions 61 --full_grid --n_seeds 30 --rounds 365 --warmup 50 --output_dir results/
 ```
 
+## Available Scenarios
 
-## Initialization Modes
+| Scenario | Description |
+|----------|-------------|
+| `baseline` | Local rewards, random init, risk neutral |
+| `global_reward` | Global rewards (both agents see total cost) |
+| `weighted_global_reward` | Weighted global with β=0.5 |
+| `demand_known_prior` | Prior knowledge from demand distribution |
+| `benchmark_init` | Warm start at centralized optimum |
+| `random_prior_init` | Random prior means |
+| `risk_averse` | Mean-variance utility with ρ=0.5 |
+| `biased_backorder` | 2× backorder cost weight |
 
-The code supports two initialization modes (controlled via `ExperimentConfig.init_mode`):
+## Treatment Parameters
 
-1. **`"random"` (default):** Agents start with no prior knowledge; all Q-values initialized to zero
-2. **`"benchmark"` (optional):** Agents initialized with pseudo-observations at the optimal policy  
-   - Each agent receives `init_prior_strength` (default: 5) pseudo-observations at \((s_1^\*, s_2^\*)\)
-   - Provides a "warm start" to accelerate convergence
-   - Not used in the default treatment grid
+### Reward Design (`reward_mode`)
+- `local` (default): Retailer reward = -H1, Supplier reward = -H2
+- `global`: Both agents receive reward = -(H1+H2)
+- `weighted_global`: Retailer = -(H1+β·H2), Supplier = -(H2+β·H1) where β = `reward_beta`
 
-This feature is implemented but not explored in the current experiment scope.
+### Initialization (`init_mode`)
+- `random` (default): Cold start with zero/uniform priors
+- `benchmark`: Warm start with pseudo-counts at centralized optimum
+- `random_prior`: Random prior means and small pseudo-counts for all arms
 
+### Prior Knowledge (`prior_knowledge`)
+- `none` (default): No prior knowledge
+- `demand_known`: Initialize priors using offline Monte Carlo estimates assuming known demand distribution
 
-## Example: Programmatic Usage
+### Utility Function (`utility_mode`)
+- `risk_neutral` (default): Maximize expected reward
+- `risk_averse`: Mean-variance utility with score = mean - ρ·std where ρ = `risk_rho`
+
+### Biased Utility (`bias_backorder_factor`)
+Scale backorder costs in perceived rewards (default 1.0). Higher values make agents overweight stockouts.
+
+### Action Grid
+- Step-based: `s_lower`, `s_upper`, `s_step` (default 0-60 step 1)
+- Count-based: `n_actions` overrides step-based, uses linspace rounded to integers
+
+## Output Files
+
+All outputs are saved to `output_dir` (default: `results/`):
+
+| File | Description |
+|------|-------------|
+| `summary.csv` | Treatment-level aggregates across seeds |
+| `runs.csv` | Per-seed metrics with outcome classification |
+| `benchmarks.csv` | Centralized optimum and Nash equilibrium counts |
+| `treatments.jsonl` | Full treatment config dictionaries |
+| `figures/` | All generated plots |
+
+### Key Metrics in `runs.csv`
+- `s1_mode`, `s2_mode`: Final converged action pair
+- `converged_to_central`: Boolean, mode equals centralized optimum
+- `converged_to_ne`: Boolean, mode is a Nash equilibrium
+- `delta1`, `delta2`: Deviation incentives (≈0 at Nash equilibrium)
+- `distance_to_central`: L1 distance to centralized optimum
+
+### Key Metrics in `summary.csv`
+- `converged_to_central_rate`, `converged_to_ne_rate`: Rates across seeds
+- `ne_count`: Number of pure Nash equilibria
+- `delta1_mean`, `delta2_mean`: Average deviation incentives among converged runs
+
+## Nash Equilibrium Computation
+
+The `centralsolver` module computes:
+1. **Payoff matrices**: H1(s1,s2), H2(s1,s2), Htot(s1,s2) via Monte Carlo
+2. **Best responses**: BR1(s2) = argmin H1(·,s2), BR2(s1) = argmin H2(s1,·)
+3. **Pure Nash equilibria**: (s1,s2) where s1 ∈ BR1(s2) and s2 ∈ BR2(s1)
+
+Results are cached by `config.config_key()` for efficiency.
+
+## Plots
+
+| Plot | Description |
+|------|-------------|
+| `learning_curves_all.png` | Mean total cost over time by algorithm pair |
+| `convergence_comparison.png` | Convergence rates and times |
+| `regret_comparison.png` | Total regret by treatment |
+| `final_action_scatter.png` | Final (s1,s2) pairs with central optimum and NE overlay |
+| `algorithm_heatmaps.png` | 5×5 heatmaps for regret, convergence, NE/central rates |
+| `best_response_curves.png` | BR1/BR2 correspondences with NE intersections |
+| `ne_classification_comparison.png` | Outcome classification rates |
+| `deviation_incentives.png` | δ1, δ2 by treatment (≈0 = Nash stable) |
+
+## Agent Types
+
+| Type | Algorithm |
+|------|-----------|
+| `greedy` | ε-greedy with decaying exploration |
+| `ucb` | UCB1 with optimism bonus |
+| `thompson` | Thompson Sampling (Normal-Inverse-Gamma) |
+| `exp3` | Exponential weights (adversarial) |
+| `etc` | Explore-Then-Commit |
+
+## Example: Treatment Sweep
 
 ```python
+from experiment_runner import create_treatment_grid, run_experiment_grid
 from config import ExperimentConfig
-from model import TwoStageSupplyChainModel
-from centralsolver import compute_benchmark
-from metrics import compute_run_metrics
 
-# Create configuration
-cfg = ExperimentConfig(
-    lam=20.0,           # Poisson demand rate (default)
-    rounds=365,         # Training rounds
-    warmup=50,          # Warmup rounds excluded from metrics
-    agent_retailer="ucb",
-    agent_supplier="greedy",
-    init_mode="random", # "random" or "benchmark"
+# Create 5×5 algorithm grid with specific settings
+treatments = create_treatment_grid(
+    full_grid=True,
+    n_actions=61,
+    init_mode="random",
+    reward_mode="local",
 )
 
-# Compute system-optimal benchmark
-s1_opt, s2_opt, ctot_opt = compute_benchmark(cfg)
-print(f"Benchmark: s1*={s1_opt}, s2*={s2_opt}, c*={ctot_opt:.2f}€")
-
-# Run simulation
-model = TwoStageSupplyChainModel(config=cfg, seed=42)
-model.run(cfg.rounds)
-
-# Compute metrics (post-warmup)
-metrics = compute_run_metrics(model, ctot_opt, cfg.rounds, cfg.warmup)
-print("Both converged:", metrics["both_converged"])
-print(f"Post-warmup total regret: {metrics['train_total_regret']:.2f}€")
+results = run_experiment_grid(
+    treatments=treatments,
+    base_config=ExperimentConfig(rounds=365, warmup=50),
+    n_seeds=50,
+    output_dir="results_sweep",
+)
 ```
+
+## Reproducibility
+
+- All RNG is seeded: `demand_rng` (demand draws), `algo_rng` (Thompson), Mesa's `self.random` (exploration)
+- Benchmark and Nash computations are cached by config key
+- Treatment configs are saved to `treatments.jsonl`
