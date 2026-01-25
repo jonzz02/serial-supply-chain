@@ -64,6 +64,7 @@ def compute_run_metrics(model, ctot_opt: float, train_rounds: int, warmup: int =
     to_central = to_ne = False
     delta1 = delta2 = float('nan')
     dist = None
+    dist_nash = None
     
     if both and s1_mode is not None and s2_mode is not None:
         if s1_opt is not None and s2_opt is not None:
@@ -74,6 +75,7 @@ def compute_run_metrics(model, ctot_opt: float, train_rounds: int, warmup: int =
         if is_rn:
             if ne_set:
                 to_ne = (s1_mode, s2_mode) in ne_set
+                dist_nash = min([abs(s1_mode - ne[0]) + abs(s2_mode - ne[1]) for ne in ne_set])
             if config:
                 from .centralsolver import get_deviation_incentives
                 delta1, delta2 = get_deviation_incentives(s1_mode, s2_mode, config)
@@ -90,7 +92,7 @@ def compute_run_metrics(model, ctot_opt: float, train_rounds: int, warmup: int =
         "s2_converged": conv_s2["converged"], "s2_conv_time": s2_ct + start if s2_ct is not None else None,
         "s2_final": conv_s2["final_action"], "s2_mode": s2_mode, "s2_volatility": conv_s2["volatility"],
         "both_converged": both, "converged_to_central": to_central, "converged_to_ne": to_ne,
-        "delta1": delta1, "delta2": delta2, "distance_to_central": dist,
+        "delta1": delta1, "delta2": delta2, "distance_to_central": dist, "distance_to_nash": dist_nash,
         "cum_reward_retailer": float(model.retailer.reward_cum),
         "cum_reward_supplier": float(model.supplier.reward_cum),
         "_total_costs": costs, "_s1_actions": s1, "_s2_actions": s2, "_cumulative_regret": cumulative,
@@ -124,6 +126,10 @@ def aggregate_metrics(run_list: list) -> Dict[str, Any]:
     dist = [m.get("distance_to_central") for m in run_list if m.get("both_converged") and m.get("distance_to_central") is not None]
     if dist:
         agg["distance_to_central_mean"], agg["distance_to_central_std"] = float(np.mean(dist)), float(np.std(dist))
+    
+    dist_nash = [m.get("distance_to_nash") for m in run_list if m.get("both_converged") and m.get("distance_to_nash") is not None]
+    if dist_nash:
+        agg["distance_to_nash_mean"], agg["distance_to_nash_std"] = float(np.mean(dist_nash)), float(np.std(dist_nash))
     
     for role in ["s1", "s2"]:
         times = [m[f"{role}_conv_time"] for m in run_list if m[f"{role}_conv_time"] is not None]

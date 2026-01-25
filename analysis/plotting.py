@@ -103,7 +103,6 @@ def plot_all_learning_curves_comparison(timeseries: List[Dict], treatments: List
                                         output_dir: str, warmup: int = 0):
     set_style()
     
-    # Find unique retailer and supplier algorithms from the timeseries
     retailer_algos_set = set()
     supplier_algos_set = set()
     for ts in timeseries:
@@ -129,12 +128,10 @@ def plot_all_learning_curves_comparison(timeseries: List[Dict], treatments: List
     for idx, ret_algo in enumerate(retailer_algos):
         ax = axes[idx]
         
-        # Collect entries with this retailer algorithm
         ret_entries = [t for t in timeseries if t.get("agent_retailer") == ret_algo]
         
         for sup_idx, sup_algo in enumerate(supplier_algos):
             color = colors[sup_idx % len(colors)]
-            # Filter by supplier algorithm
             ts_data = [t for t in ret_entries if t.get("agent_supplier") == sup_algo]
             if not ts_data:
                 continue
@@ -230,6 +227,8 @@ def plot_algorithm_heatmaps(summary_df: pd.DataFrame, output_dir: str):
         metrics_to_plot.append(("converged_to_ne_rate", "Converged to NE Rate", "Blues"))
     if "converged_to_central_rate" in summary_df.columns:
         metrics_to_plot.append(("converged_to_central_rate", "Converged to Central Rate", "Purples"))
+    if "distance_to_nash_mean" in summary_df.columns:
+        metrics_to_plot.append(("distance_to_nash_mean", "Distance to Nash", "Oranges"))
     
     fig, axes = plt.subplots(1, len(metrics_to_plot), figsize=(5*len(metrics_to_plot), 5))
     if len(metrics_to_plot) == 1:
@@ -299,7 +298,6 @@ def plot_best_response_curves(nash_results: Dict[str, Any], output_dir: str,
     
     fig, ax = plt.subplots(figsize=(10, 8))
     
-    # Plot BR1: for each s2, plot the best s1 responses
     br1_s2 = []
     br1_s1 = []
     for j, s2 in enumerate(actions):
@@ -309,7 +307,6 @@ def plot_best_response_curves(nash_results: Dict[str, Any], output_dir: str,
     if br1_s2:
         ax.scatter(br1_s1, br1_s2, c="blue", s=50, alpha=0.6, label="BR1(s2): Retailer best response")
     
-    # Plot BR2: for each s1, plot the best s2 responses
     br2_s1 = []
     br2_s2 = []
     for i, s1 in enumerate(actions):
@@ -319,7 +316,6 @@ def plot_best_response_curves(nash_results: Dict[str, Any], output_dir: str,
     if br2_s1:
         ax.scatter(br2_s1, br2_s2, c="red", s=50, alpha=0.6, marker="s", label="BR2(s1): Supplier best response")
     
-    # Mark Nash equilibria
     if ne_set:
         ne_s1, ne_s2 = zip(*ne_set)
         ax.scatter(ne_s1, ne_s2, marker="*", s=300, c="gold", edgecolors="black",
@@ -401,6 +397,47 @@ def plot_deviation_incentives(summary_df: pd.DataFrame, output_dir: str):
     plt.close(fig)
 
 
+def plot_distance_comparison(summary_df: pd.DataFrame, output_dir: str):
+    set_style()
+    
+    has_central = "distance_to_central_mean" in summary_df.columns
+    has_nash = "distance_to_nash_mean" in summary_df.columns
+    
+    if not has_central and not has_nash:
+        return
+    
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    treatments = summary_df["treatment"].values
+    x = np.arange(len(treatments))
+    width = 0.35
+    
+    plotted = False
+    if has_central:
+        central_mean = summary_df.get("distance_to_central_mean", pd.Series([0]*len(summary_df))).fillna(0).values
+        central_std = summary_df.get("distance_to_central_std", pd.Series([0]*len(summary_df))).fillna(0).values
+        ax.bar(x - width/2, central_mean, width, yerr=central_std, label="Distance to Central", color="green", capsize=3, alpha=0.7)
+        plotted = True
+    
+    if has_nash:
+        nash_mean = summary_df.get("distance_to_nash_mean", pd.Series([0]*len(summary_df))).fillna(0).values
+        nash_std = summary_df.get("distance_to_nash_std", pd.Series([0]*len(summary_df))).fillna(0).values
+        ax.bar(x + width/2, nash_mean, width, yerr=nash_std, label="Distance to Nash", color="blue", capsize=3, alpha=0.7)
+        plotted = True
+    
+    if plotted:
+        ax.set_xticks(x)
+        ax.set_xticklabels(treatments, rotation=45, ha="right")
+        ax.set_ylabel("Manhattan Distance (actions)")
+        ax.set_title("Distance to Optimum by Treatment")
+        ax.legend()
+        
+        fig.tight_layout()
+        fig.savefig(os.path.join(output_dir, "distance_comparison.png"), dpi=150)
+    
+    plt.close(fig)
+
+
 def generate_all_plots(results: Dict[str, Any], output_dir: str = None):
     output_dir = output_dir or results.get("output_dir", "results")
     fig_dir = os.path.join(output_dir, "figures")
@@ -419,7 +456,6 @@ def generate_all_plots(results: Dict[str, Any], output_dir: str = None):
     plot_regret_comparison(summary_df, fig_dir)
     plot_convergence_comparison(summary_df, fig_dir)
     
-    # New plots
     if run_df is not None and not run_df.empty:
         plot_final_action_scatter(run_df, summary_df, nash_results, fig_dir)
     
@@ -430,5 +466,6 @@ def generate_all_plots(results: Dict[str, Any], output_dir: str = None):
     
     plot_ne_classification_comparison(summary_df, fig_dir)
     plot_deviation_incentives(summary_df, fig_dir)
+    plot_distance_comparison(summary_df, fig_dir)
     
     print(f"Plots saved to {fig_dir}/")
