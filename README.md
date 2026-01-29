@@ -8,7 +8,7 @@ This codebase addresses the "Supply Chain Coordination" project:
 - **Do agents converge?** Track `both_convergence_rate` and per-agent convergence metrics
 - **How fast do they converge?** Track `s1_conv_time`, `s2_conv_time` (absolute round indices)
 - **To what solutions?** Compare against Nash equilibria (`converged_to_ne`) and centralized optimum (`converged_to_central`)
-- **Which mechanisms influence convergence?** Reward design, prior knowledge, initialization, action grid design, utility functions
+- **Which mechanisms influence convergence?** Cooperation modes (competitive/cooperative/partial), prior knowledge, initialization, action grid design, learning algorithms
 
 ## Setup
 
@@ -39,61 +39,60 @@ This codebase addresses the "Supply Chain Coordination" project:
 
 You can verify the installation by running a quick test:
 ```bash
-python run_experiments.py --scenario baseline --n_actions 61 --n_seeds 5 --rounds 100 --warmup 20 --output_dir results/
+python run_experiments.py --scenario baseline --s_upper 60 --s_step 5 --n_seeds 5 --rounds 100 --warmup 20 --output_dir results/
 ```
 
 ## Quick Start
 
 ```bash
 # Run full 5×5 algorithm grid for baseline scenario
-python run_experiments.py --scenario baseline --n_actions 61 --full_grid --n_seeds 50 --rounds 365 --warmup 50 --output_dir results/
-
-# Run subset grid (default 4 pairs) for global reward scenario
-python run_experiments.py --scenario global_reward --n_actions 61 --n_seeds 30 --rounds 365 --warmup 50 --output_dir results/
+python run_experiments.py --scenario baseline --s_upper 60 --s_step 1 --full_grid --n_seeds 50 --rounds 365 --warmup 50 --output_dir results/
 
 # Run with benchmark initialization
-python run_experiments.py --scenario benchmark_init --n_actions 61 --full_grid --n_seeds 30 --rounds 365 --warmup 50 --output_dir results/
+python run_experiments.py --scenario benchmark_init --s_upper 60 --s_step 1 --full_grid --n_seeds 30 --rounds 365 --warmup 50 --output_dir results/
+
+# Run with demand knowledge prior (coarse grid for faster testing)
+python run_experiments.py --scenario demand_known_prior --s_upper 60 --s_step 5 --n_seeds 30 --rounds 365 --warmup 50 --output_dir results/
 ```
 
 ## Available Scenarios
 
 | Scenario | Description |
 |----------|-------------|
-| `baseline` | Local rewards, random init, risk neutral |
-| `global_reward` | Global rewards (both agents see total cost) |
-| `weighted_global_reward` | Weighted global with β=0.5 |
+| `baseline` | Random init, no prior knowledge |
 | `demand_known_prior` | Prior knowledge from demand distribution |
 | `benchmark_init` | Warm start at centralized optimum |
-| `random_prior_init` | Random prior means |
-| `risk_averse` | Mean-variance utility with ρ=0.5 |
-| `biased_backorder` | 2× backorder cost weight |
 
 ## Treatment Parameters
-
-### Reward Design (`reward_mode`)
-- `local` (default): Retailer reward = -H1, Supplier reward = -H2
-- `global`: Both agents receive reward = -(H1+H2)
-- `weighted_global`: Retailer = -(H1+β·H2), Supplier = -(H2+β·H1) where β = `reward_beta`
 
 ### Initialization (`init_mode`)
 - `random` (default): Cold start with zero/uniform priors
 - `benchmark`: Warm start with pseudo-counts at centralized optimum
-- `random_prior`: Random prior means and small pseudo-counts for all arms
 
 ### Prior Knowledge (`prior_knowledge`)
 - `none` (default): No prior knowledge
 - `demand_known`: Initialize priors using offline Monte Carlo estimates assuming known demand distribution
 
-### Utility Function (`utility_mode`)
-- `risk_neutral` (default): Maximize expected reward
-- `risk_averse`: Mean-variance utility with score = mean - ρ·std where ρ = `risk_rho`
+### Cooperation Mode (`cooperation_mode`)
+Controls how agents' rewards are computed from costs H1 (retailer) and H2 (supplier):
 
-### Biased Utility (`bias_backorder_factor`)
-Scale backorder costs in perceived rewards (default 1.0). Higher values make agents overweight stockouts.
+| Mode | Retailer Reward | Supplier Reward | Description |
+|------|----------------|-----------------|-------------|
+| `competitive` (default) | r1 = -H1 | r2 = -H2 | Each agent optimizes own local cost |
+| `cooperative` | r1 = -(H1+H2) | r2 = -(H1+H2) | Both agents optimize joint system cost |
+| `partial` | r1 = -(H1+β·H2) | r2 = -(H2+β·H1) | Partial internalization of other's cost (β ∈ [0,1]) |
+
+**Beta parameter** (`cooperation_beta`): For `partial` mode, controls degree of cost internalization
+- β = 0.0: equivalent to competitive
+- β = 0.5: equal weight to own and other's cost
+- β = 1.0: maximum internalization (approaches cooperative)
+
+**Note**: Payoff matrices, Nash equilibria, and prior rewards are computed based on the cooperation mode, ensuring consistency between learning signals and equilibrium analysis.
 
 ### Action Grid
-- Step-based: `s_lower`, `s_upper`, `s_step` (default 0-60 step 1)
-- Count-based: `n_actions` overrides step-based, uses linspace rounded to integers
+- Action space is defined by: `s_lower`, `s_upper`, `s_step`
+- Default: 0 to 60 with step 1 (61 actions)
+- Example: `s_lower=0, s_upper=40, s_step=5` gives actions [0, 5, 10, 15, 20, 25, 30, 35, 40]
 
 ## Output Files
 
@@ -110,23 +109,27 @@ All outputs are saved to `output_dir` (default: `results/`):
 ### Key Metrics in `runs.csv`
 - `s1_mode`, `s2_mode`: Final converged action pair
 - `converged_to_central`: Boolean, mode equals centralized optimum
-- `converged_to_ne`: Boolean, mode is a Nash equilibrium
+- `converged_to_ne`: Boolean/None, mode is a Nash equilibrium (None if no pure NE exists)
 - `delta1`, `delta2`: Deviation incentives (≈0 at Nash equilibrium)
 - `distance_to_central`: L1 distance to centralized optimum
+- `cooperation_mode`, `cooperation_beta`: Cooperation settings for this run
 
 ### Key Metrics in `summary.csv`
 - `converged_to_central_rate`, `converged_to_ne_rate`: Rates across seeds
+- `ne_exists`: Boolean, whether pure Nash equilibria exist for this treatment
 - `ne_count`: Number of pure Nash equilibria
 - `delta1_mean`, `delta2_mean`: Average deviation incentives among converged runs
+- `cooperation_mode`, `cooperation_beta`: Cooperation settings for this treatment
 
 ## Nash Equilibrium Computation
 
 The `centralsolver` module computes:
-1. **Payoff matrices**: H1(s1,s2), H2(s1,s2), Htot(s1,s2) via Monte Carlo
-2. **Best responses**: BR1(s2) = argmin H1(·,s2), BR2(s1) = argmin H2(s1,·)
-3. **Pure Nash equilibria**: (s1,s2) where s1 ∈ BR1(s2) and s2 ∈ BR2(s1)
+1. **Cost matrices**: H1(s1,s2), H2(s1,s2), Htot(s1,s2) via Monte Carlo
+2. **Payoff matrices**: J1, J2 based on cooperation mode (e.g., J1=H1+β·H2 for partial)
+3. **Best responses**: BR1(s2) = argmin J1(·,s2), BR2(s1) = argmin J2(s1,·)
+4. **Pure Nash equilibria**: (s1,s2) where s1 ∈ BR1(s2) and s2 ∈ BR2(s1)
 
-Results are cached by `config.config_key()` for efficiency.
+Results are cached by `config.game_key()` (includes cooperation_mode and beta) for efficiency.
 
 ## Plots
 
@@ -155,14 +158,16 @@ Results are cached by `config.config_key()` for efficiency.
 
 ```python
 from experiment_runner import create_treatment_grid, run_experiment_grid
-from config import ExperimentConfig
+from simulation.config import ExperimentConfig
 
 # Create 5×5 algorithm grid with specific settings
 treatments = create_treatment_grid(
     full_grid=True,
-    n_actions=61,
+    s_lower=0,
+    s_upper=60,
+    s_step=1,
     init_mode="random",
-    reward_mode="local",
+    cooperation_mode="competitive",
 )
 
 results = run_experiment_grid(
@@ -172,6 +177,27 @@ results = run_experiment_grid(
     output_dir="results_sweep",
 )
 ```
+
+## Master Experiment
+
+Run nested factorial design across all treatment dimensions:
+
+```bash
+python master_experiment.py --n_seeds 100 --rounds 365 --warmup 50 --max_workers 8 --output_dir results_master
+```
+
+This creates treatments varying:
+- Algorithm pairs (5×5 = 25 combinations)
+- Grid sizes (coarse: 41 actions, medium: 61, fine: 81)
+- Prior knowledge (none/demand_known)
+- Initialization modes (random/benchmark) - nested within prior_knowledge
+- Cooperation modes (competitive/cooperative/partial with β ∈ {0.25, 0.5, 0.75})
+
+**Nested Design (no redundancy):**
+- `prior_knowledge="demand_known"` → always uses `init_mode="random"` (prior handles initialization)
+- `prior_knowledge="none"` → tests both `init_mode="random"` and `init_mode="benchmark"`
+
+Total: 1,125 treatments × 100 seeds = 112,500 runs (~10-15 minutes)
 
 ## Reproducibility
 

@@ -18,6 +18,7 @@ class TwoStageSupplyChainModel(Model):
         self.I1 = self.I2 = self.B1 = self.B2 = 0
         self.U1_prev = self.U2_prev = 0
         self.last_total_cost = self.cost_retailer = self.cost_supplier = 0.0
+        self.last_demand = 0
         self._max_steps = self.config.rounds
         
         self.datacollector = DataCollector(
@@ -27,6 +28,8 @@ class TwoStageSupplyChainModel(Model):
                 "Cost Supplier": "cost_supplier",
                 "S1": lambda m: m.retailer.action,
                 "S2": lambda m: m.supplier.action,
+                "I1": "I1", "I2": "I2", "B1": "B1", "B2": "B2",
+                "U1": "U1_prev", "U2": "U2_prev", "D": "last_demand",
             },
             agent_reporters={
                 "Role": "role",
@@ -63,31 +66,24 @@ class TwoStageSupplyChainModel(Model):
         self.U1_prev, self.U2_prev = U1, U2
         self.last_total_cost = float(H1 + H2)
         self.cost_retailer, self.cost_supplier = float(H1), float(H2)
+        self.last_demand = D
 
-        bias = cfg.bias_backorder_factor
-        if bias != 1.0:
-            H1_p = (cfg.h1 + cfg.h2) * I1 + cfg.alpha * cfg.p_bo * B1 * bias
-            H2_p = cfg.h2 * (I2 + U1) + (1.0 - cfg.alpha) * cfg.p_bo * B1 * bias
-        else:
-            H1_p, H2_p = H1, H2
-
-        return float(H1), float(H2), float(H1_p), float(H2_p)
+        return float(H1), float(H2)
 
     def step(self):
         cfg = self.config
         self.agents.do("select_action")
         
-        H1, H2, H1_p, H2_p = self.env_step(int(self.retailer.action), int(self.supplier.action))
+        H1, H2 = self.env_step(int(self.retailer.action), int(self.supplier.action))
         
-        if cfg.reward_mode == "local":
-            r1, r2 = -H1_p, -H2_p
-        elif cfg.reward_mode == "global":
-            r1 = r2 = -(H1_p + H2_p)
-        elif cfg.reward_mode == "weighted_global":
-            r1 = -(H1_p + cfg.reward_beta * H2_p)
-            r2 = -(H2_p + cfg.reward_beta * H1_p)
-        else:
-            r1, r2 = -H1_p, -H2_p
+        if cfg.cooperation_mode == "cooperative":
+            r1 = r2 = -(H1 + H2)
+        elif cfg.cooperation_mode == "partial":
+            beta = cfg.cooperation_beta
+            r1 = -(H1 + beta * H2)
+            r2 = -(H2 + beta * H1)
+        else:  # competitive: reward is always local (each agent sees only their own costs)
+            r1, r2 = -H1, -H2
 
         self.rewards[self.retailer], self.rewards[self.supplier] = r1, r2
         self.retailer.reward, self.supplier.reward = r1, r2

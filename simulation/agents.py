@@ -16,10 +16,6 @@ class BanditAgent(Agent):
         self.reward = self.reward_cum = 0.0
 
     def _get_scores(self):
-        cfg = self._config
-        if cfg.utility_mode == "risk_averse" and cfg.risk_rho > 0:
-            var = np.where(self.counts > 1, self.M2 / (self.counts - 1 + 1e-10), 0.0)
-            return self.average_reward - cfg.risk_rho * np.sqrt(var)
         return self.average_reward
 
     def _update_stats(self, a_idx, r):
@@ -45,7 +41,9 @@ class GreedyAgent(BanditAgent):
         if self.model.rng.random() < self.eps:
             self.action_idx = int(self.model.rng.integers(0, self.n_actions))
         else:
-            self.action_idx = int(np.argmax(self._get_scores()))
+            scores = self._get_scores()
+            best = np.flatnonzero(scores == scores.max())
+            self.action_idx = int(self.model.rng.choice(best))
         self.action = int(self.action_space[self.action_idx])
 
     def update_belief(self):
@@ -166,7 +164,9 @@ class EtcAgent(BanditAgent):
                     break
                 self._explore_idx += 1
             else:
-                self.committed_arm = int(np.argmax(self._get_scores()))
+                scores = self._get_scores()
+                best = np.flatnonzero(scores == scores.max())
+                self.committed_arm = int(self.model.rng.choice(best))
                 self.action_idx = self.committed_arm
         self.action = int(self.action_space[self.action_idx])
 
@@ -199,24 +199,6 @@ def initialize_agent_benchmark(agent, opt_action: int, prior_reward: float, prio
         agent.beta_param[idx] = prior_strength / 2
     elif isinstance(agent, Exp3Agent):
         agent.weights[idx] = np.exp(prior_strength)
-
-
-def initialize_agent_random_prior(agent, seed: int, prior_strength: int = 2, mean_scale: float = 1.0):
-    rng = np.random.default_rng(seed)
-    n = agent.n_actions
-    
-    if isinstance(agent, (GreedyAgent, UcbAgent, EtcAgent)):
-        agent.counts = rng.integers(1, prior_strength + 1, size=n).astype(int)
-        agent.average_reward = rng.uniform(-50.0 * mean_scale, 0.0, size=n)
-        if isinstance(agent, UcbAgent):
-            agent.total_plays = int(agent.counts.sum())
-    elif isinstance(agent, ThompsonAgent):
-        agent.mu = rng.uniform(-50.0 * mean_scale, 0.0, size=n)
-        agent.kappa = rng.uniform(1.0, prior_strength + 1, size=n)
-        agent.alpha_param = rng.uniform(1.0, prior_strength / 2 + 1, size=n)
-        agent.beta_param = rng.uniform(1.0, prior_strength / 2 + 1, size=n)
-    elif isinstance(agent, Exp3Agent):
-        agent.weights = rng.uniform(0.9, 1.1, size=n)
 
 
 def initialize_agent_prior_knowledge(agent, prior_means: np.ndarray, prior_strength: int = 3):
