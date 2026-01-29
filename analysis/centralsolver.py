@@ -4,6 +4,15 @@ from typing import Tuple, Dict, Any
 _benchmark_cache, _payoff_cache, _nash_cache, _prior_cache = {}, {}, {}, {}
 
 
+def _effective_costs(H1: float, H2: float, cooperation_mode: str, beta: float):
+    if cooperation_mode == "cooperative":
+        J = H1 + H2
+        return J, J
+    if cooperation_mode == "partial":
+        return H1 + beta * H2, H2 + beta * H1
+    return H1, H2  # competitive
+
+
 def _env_step(rng, I1, I2, B1, B2, U1p, U2p, s1, s2, lam, h1, h2, p_bo, alpha):
     I1 += U1p
     I2 += U2p
@@ -21,17 +30,13 @@ def _env_step(rng, I1, I2, B1, B2, U1p, U2p, s1, s2, lam, h1, h2, p_bo, alpha):
     return I1, I2, B1, B2, U1, U2, float(H1 + H2), float(H1), float(H2)
 
 
-def _estimate_costs(s1, s2, seed, rounds, warmup, lam, h1, h2, p_bo, alpha, bias=1.0):
+def _estimate_costs(s1, s2, seed, rounds, warmup, lam, h1, h2, p_bo, alpha):
     rng = np.random.default_rng(seed)
     I1 = I2 = B1 = B2 = U1 = U2 = 0
     sH1 = sH2 = sTot = cnt = 0.0
     for t in range(rounds + warmup):
         I1, I2, B1, B2, U1, U2, _, H1, H2 = _env_step(rng, I1, I2, B1, B2, U1, U2, s1, s2, lam, h1, h2, p_bo, alpha)
         if t >= warmup:
-            if bias != 1.0:
-                bo1, bo2 = alpha * p_bo * B1, (1.0 - alpha) * p_bo * B1
-                H1 = H1 - bo1 + bo1 * bias
-                H2 = H2 - bo2 + bo2 * bias
             sH1 += H1
             sH2 += H2
             sTot += H1 + H2
@@ -40,14 +45,16 @@ def _estimate_costs(s1, s2, seed, rounds, warmup, lam, h1, h2, p_bo, alpha, bias
     return sH1 / n, sH2 / n, sTot / n
 
 
-def _estimate_reward(s1, s2, seed, rounds, warmup, lam, h1, h2, p_bo, alpha, role):
+def _estimate_reward(s1, s2, seed, rounds, warmup, lam, h1, h2, p_bo, alpha, role,
+                     cooperation_mode: str = "competitive", beta: float = 0.5):
     rng = np.random.default_rng(seed)
     I1 = I2 = B1 = B2 = U1 = U2 = 0
     total = cnt = 0.0
     for t in range(rounds + warmup):
         I1, I2, B1, B2, U1, U2, _, H1, H2 = _env_step(rng, I1, I2, B1, B2, U1, U2, s1, s2, lam, h1, h2, p_bo, alpha)
         if t >= warmup:
-            total += (-H1 if role == "retailer" else -H2)
+            J1, J2 = _effective_costs(H1, H2, cooperation_mode, beta)
+            total += (-J1 if role == "retailer" else -J2)
             cnt += 1
     return total / max(1, cnt)
 
@@ -71,7 +78,7 @@ def compute_benchmark(config, seed: int = 42) -> Tuple[int, int, float]:
 
 
 def compute_payoff_matrices(config, seed: int = 42) -> Dict[str, Any]:
-    key = (config.game_key(), seed)
+    key = (config.game_key(), seed, config.cooperation_mode, config.cooperation_beta)
     if key in _payoff_cache:
         return _payoff_cache[key]
     
@@ -85,38 +92,40 @@ def compute_payoff_matrices(config, seed: int = 42) -> Dict[str, Any]:
         for j, s2 in enumerate(actions):
             costs = [_estimate_costs(int(s1), int(s2), seed + k * n * n + i * n + j,
                                       config.payoff_rounds, config.payoff_warmup,
-                                      config.lam, config.h1, config.h2, config.p_bo, config.alpha,
-                                      config.bias_backorder_factor)
+                                      config.lam, config.h1, config.h2, config.p_bo, config.alpha)
                      for k in range(config.payoff_n_seeds)]
             H1[i, j] = np.mean([c[0] for c in costs])
             H2[i, j] = np.mean([c[1] for c in costs])
             Htot[i, j] = np.mean([c[2] for c in costs])
     
-    if config.reward_mode == "local":
-        J1, J2 = H1.copy(), H2.copy()
-    elif config.reward_mode == "global":
-        J1 = J2 = Htot.copy()
-    elif config.reward_mode == "weighted_global":
-        J1 = H1 + config.reward_beta * H2
-        J2 = H2 + config.reward_beta * H1
+    mode = config.cooperation_mode
+    beta = config.cooperation_beta
+    if mode == "cooperative":
+        J1 = Htot.copy()
+        J2 = Htot.copy()
+    elif mode == "partial":
+        J1 = H1 + beta * H2
+        J2 = H2 + beta * H1
     else:
-        J1, J2 = H1.copy(), H2.copy()
+        J1 = H1.copy()
+        J2 = H2.copy()
     
     result = {"actions": actions, "H1": H1, "H2": H2, "Htot": Htot, "J1": J1, "J2": J2}
     _payoff_cache[key] = result
     return result
 
 
-def compute_best_responses(payoff: Dict[str, Any]) -> Dict[str, Any]:
+def compute_best_responses(payoff: Dict[str, Any], tau: float = 0.5) -> Dict[str, Any]:
+    """Compute best response correspondences with absolute tolerance tau (cost units)."""
     J1, J2, actions = payoff["J1"], payoff["J2"], payoff["actions"]
     n = len(actions)
-    BR1 = [np.flatnonzero(np.isclose(J1[:, j], J1[:, j].min(), rtol=1e-6)).tolist() for j in range(n)]
-    BR2 = [np.flatnonzero(np.isclose(J2[i, :], J2[i, :].min(), rtol=1e-6)).tolist() for i in range(n)]
+    BR1 = [np.flatnonzero(J1[:, j] <= J1[:, j].min() + tau).tolist() for j in range(n)]
+    BR2 = [np.flatnonzero(J2[i, :] <= J2[i, :].min() + tau).tolist() for i in range(n)]
     return {"BR1": BR1, "BR2": BR2, "actions": actions}
 
 
 def compute_pure_nash(config, seed: int = 42) -> Dict[str, Any]:
-    key = (config.game_key(), seed)
+    key = (config.game_key(), seed, config.cooperation_mode, config.cooperation_beta)
     if key in _nash_cache:
         return _nash_cache[key]
     
@@ -142,18 +151,21 @@ def get_deviation_incentives(s1_mode: int, s2_mode: int, config, seed: int = 42)
 
 
 def compute_prior_rewards(config, s1_opt: int, s2_opt: int, seed_offset: int = 1000) -> Tuple[float, float]:
-    r1 = _estimate_reward(s1_opt, s2_opt, seed_offset, 200, 50, config.lam, config.h1, config.h2, config.p_bo, config.alpha, "retailer")
-    r2 = _estimate_reward(s1_opt, s2_opt, seed_offset + 1, 200, 50, config.lam, config.h1, config.h2, config.p_bo, config.alpha, "supplier")
+    r1 = _estimate_reward(s1_opt, s2_opt, seed_offset, 200, 50,
+                          config.lam, config.h1, config.h2, config.p_bo, config.alpha,
+                          "retailer", config.cooperation_mode, config.cooperation_beta)
+    r2 = _estimate_reward(s1_opt, s2_opt, seed_offset + 1, 200, 50,
+                          config.lam, config.h1, config.h2, config.p_bo, config.alpha,
+                          "supplier", config.cooperation_mode, config.cooperation_beta)
     return r1, r2
 
 
 def compute_prior_knowledge_rewards(config, role: str, assumed_other: str = "central", seed: int = 2000) -> np.ndarray:
-    key = (config.benchmark_key(), role, assumed_other, seed)
+    key = (config.benchmark_key(), role, assumed_other, seed, config.cooperation_mode, config.cooperation_beta)
     if key in _prior_cache:
         return _prior_cache[key]
     
     actions = config.action_space()
-    n = len(actions)
     
     if assumed_other == "central":
         s1_opt, s2_opt, _ = compute_benchmark(config)
@@ -165,8 +177,13 @@ def compute_prior_knowledge_rewards(config, role: str, assumed_other: str = "cen
     warmup = max(10, config.benchmark_warmup // 10)
     
     priors = np.array([
-        _estimate_reward(int(s) if role == "retailer" else other, other if role == "retailer" else int(s),
-                         seed + idx, rounds, warmup, config.lam, config.h1, config.h2, config.p_bo, config.alpha, role)
+        _estimate_reward(
+            int(s) if role == "retailer" else other,
+            other if role == "retailer" else int(s),
+            seed + idx, rounds, warmup,
+            config.lam, config.h1, config.h2, config.p_bo, config.alpha,
+            role, config.cooperation_mode, config.cooperation_beta
+        )
         for idx, s in enumerate(actions)
     ])
     

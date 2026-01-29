@@ -9,7 +9,7 @@ from itertools import product
 
 from simulation.config import ExperimentConfig
 from simulation.model import TwoStageSupplyChainModel
-from simulation.agents import initialize_agent_benchmark, initialize_agent_random_prior, initialize_agent_prior_knowledge
+from simulation.agents import initialize_agent_benchmark, initialize_agent_prior_knowledge
 from analysis.centralsolver import compute_benchmark, compute_pure_nash, compute_prior_rewards, compute_prior_knowledge_rewards
 from analysis.metrics import compute_run_metrics, aggregate_metrics
 
@@ -21,28 +21,25 @@ class TreatmentConfig:
     s_lower: int = 0
     s_upper: int = 60
     s_step: int = 1
-    n_actions: Optional[int] = None
     init_mode: str = "random"
     prior_knowledge: str = "none"
-    reward_mode: str = "local"
-    reward_beta: float = 0.0
-    utility_mode: str = "risk_neutral"
-    risk_rho: float = 0.0
-    bias_backorder_factor: float = 1.0
+    cooperation_mode: str = "competitive"
+    cooperation_beta: float = 0.5
     
     @property
     def name(self) -> str:
-        base = f"{self.agent_retailer}_{self.agent_supplier}_s{self.s_lower}-{self.s_upper}"
-        return base + (f"-n{self.n_actions}" if self.n_actions else f"-{self.s_step}")
+        return f"{self.agent_retailer}_{self.agent_supplier}_s{self.s_lower}-{self.s_upper}-{self.s_step}"
     
     @property
     def full_name(self) -> str:
         parts = [self.name]
         if self.init_mode != "random": parts.append(f"init={self.init_mode}")
         if self.prior_knowledge != "none": parts.append(f"prior={self.prior_knowledge}")
-        if self.reward_mode != "local": parts.append(f"reward={self.reward_mode}_b{self.reward_beta}")
-        if self.utility_mode != "risk_neutral": parts.append(f"util={self.utility_mode}_r{self.risk_rho}")
-        if self.bias_backorder_factor != 1.0: parts.append(f"bias={self.bias_backorder_factor}")
+        if self.cooperation_mode != "competitive":
+            if self.cooperation_mode == "partial":
+                parts.append(f"coop=partial_beta={self.cooperation_beta}")
+            else:
+                parts.append(f"coop={self.cooperation_mode}")
         return "_".join(parts)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -53,37 +50,33 @@ AVAILABLE_AGENTS = ["greedy", "ucb", "thompson", "exp3", "etc"]
 DEFAULT_AGENT_PAIRS = [("greedy", "greedy"), ("ucb", "ucb"), ("greedy", "ucb"), ("ucb", "greedy")]
 
 
-def create_treatment_grid(agent_pairs: List[Tuple[str, str]] = None, n_actions: Optional[int] = None,
+def create_treatment_grid(agent_pairs: List[Tuple[str, str]] = None, 
                           full_grid: bool = False, **kwargs) -> List[TreatmentConfig]:
     pairs = list(product(AVAILABLE_AGENTS, AVAILABLE_AGENTS)) if full_grid else (agent_pairs or DEFAULT_AGENT_PAIRS)
-    return [TreatmentConfig(agent_retailer=r, agent_supplier=s, n_actions=n_actions, **kwargs) for r, s in pairs]
+    return [TreatmentConfig(agent_retailer=r, agent_supplier=s, **kwargs) for r, s in pairs]
 
 
 def _build_config(treatment: TreatmentConfig, base: ExperimentConfig) -> ExperimentConfig:
     return ExperimentConfig(
         h1=base.h1, h2=base.h2, p_bo=base.p_bo, alpha=base.alpha, lam=base.lam,
         s_lower=treatment.s_lower, s_upper=treatment.s_upper, s_step=treatment.s_step,
-        n_actions=treatment.n_actions, eps_start=base.eps_start, eps_end=base.eps_end,
+        eps_start=base.eps_start, eps_end=base.eps_end,
         exp3_gamma=base.exp3_gamma, etc_explore_rounds=base.etc_explore_rounds,
         rounds=base.rounds, warmup=base.warmup,
         benchmark_rounds=base.benchmark_rounds, benchmark_warmup=base.benchmark_warmup,
-        benchmark_n_seeds=base.benchmark_n_seeds, init_mode=treatment.init_mode,
-        init_prior_strength=base.init_prior_strength, init_mean_scale=base.init_mean_scale,
+        benchmark_n_seeds=base.benchmark_n_seeds,
+        payoff_rounds=base.payoff_rounds, payoff_warmup=base.payoff_warmup,
+        payoff_n_seeds=base.payoff_n_seeds,
+        init_mode=treatment.init_mode, init_prior_strength=base.init_prior_strength,
         prior_knowledge=treatment.prior_knowledge, prior_assumed_other=base.prior_assumed_other,
-        prior_strength=base.prior_strength, reward_mode=treatment.reward_mode,
-        reward_beta=treatment.reward_beta, utility_mode=treatment.utility_mode,
-        risk_rho=treatment.risk_rho, bias_backorder_factor=treatment.bias_backorder_factor,
+        prior_strength=base.prior_strength,
         agent_retailer=treatment.agent_retailer, agent_supplier=treatment.agent_supplier,
+        cooperation_mode=treatment.cooperation_mode, cooperation_beta=treatment.cooperation_beta,
     )
 
 
 def run_single_seed(config: ExperimentConfig, seed: int, ctot_opt: float, s1_opt: int, s2_opt: int,
                     ne_set: List[Tuple[int, int]] = None, conv_window: int = 50, conv_threshold: float = 0.9) -> Dict[str, Any]:
-    uses_special = config.init_mode == "benchmark" or config.prior_knowledge != "none"
-    uses_nonlocal = config.reward_mode != "local" or config.bias_backorder_factor != 1.0
-    if uses_special and uses_nonlocal:
-        raise ValueError("Inconsistent: special init with non-local reward")
-    
     model = TwoStageSupplyChainModel(config=config, seed=seed)
     
     if config.prior_knowledge == "demand_known":
@@ -95,9 +88,6 @@ def run_single_seed(config: ExperimentConfig, seed: int, ctot_opt: float, s1_opt
         r1, r2 = compute_prior_rewards(config, s1_opt, s2_opt, seed_offset=1000 + seed)
         initialize_agent_benchmark(model.retailer, s1_opt, r1, config.init_prior_strength)
         initialize_agent_benchmark(model.supplier, s2_opt, r2, config.init_prior_strength)
-    elif config.init_mode == "random_prior":
-        initialize_agent_random_prior(model.retailer, seed * 2, config.init_prior_strength, config.init_mean_scale)
-        initialize_agent_random_prior(model.supplier, seed * 2 + 1, config.init_prior_strength, config.init_mean_scale)
     
     model.run(config.rounds)
     metrics = compute_run_metrics(model, ctot_opt, config.rounds, config.warmup, conv_window, conv_threshold,
@@ -131,10 +121,8 @@ def run_treatment(treatment: TreatmentConfig, base_config: ExperimentConfig, see
         "treatment": treatment.name, "treatment_full": treatment.full_name,
         "agent_retailer": treatment.agent_retailer, "agent_supplier": treatment.agent_supplier,
         "s_lower": treatment.s_lower, "s_upper": treatment.s_upper, "s_step": treatment.s_step,
-        "n_actions": treatment.n_actions, "init_mode": treatment.init_mode, "prior_knowledge": treatment.prior_knowledge,
-        "reward_mode": treatment.reward_mode, "reward_beta": treatment.reward_beta,
-        "utility_mode": treatment.utility_mode, "risk_rho": treatment.risk_rho,
-        "bias_backorder_factor": treatment.bias_backorder_factor,
+        "init_mode": treatment.init_mode, "prior_knowledge": treatment.prior_knowledge,
+        "cooperation_mode": treatment.cooperation_mode, "cooperation_beta": treatment.cooperation_beta,
         "s1_opt": s1_opt, "s2_opt": s2_opt, "ctot_opt": ctot_opt, "ne_count": nash["ne_count"],
     })
     
@@ -170,7 +158,8 @@ def run_experiment_grid(treatments: List[TreatmentConfig] = None, base_config: E
         
         for m in result["run_metrics"]:
             m.update({"treatment": t.name, "treatment_full": t.full_name, "init_mode": t.init_mode,
-                      "prior_knowledge": t.prior_knowledge, "reward_mode": t.reward_mode, "utility_mode": t.utility_mode})
+                      "prior_knowledge": t.prior_knowledge,
+                      "cooperation_mode": t.cooperation_mode, "cooperation_beta": t.cooperation_beta})
             all_runs.append(m)
         
         all_ts.extend([{**ts, "treatment": t.name, "treatment_full": t.full_name} for ts in result["timeseries"]])
