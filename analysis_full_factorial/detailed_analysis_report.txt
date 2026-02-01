@@ -2,7 +2,7 @@
 SUPPLY CHAIN COORDINATION EXPERIMENT ANALYSIS REPORT
 ================================================================================
 
-Generated: 2026-02-01 13:28:45
+Generated: 2026-02-01 13:37:36
 Results directory: results_full_factorial
 
 ================================================================================
@@ -121,7 +121,7 @@ Convergence threshold: 0.9
     S2 (Supplier) convergence:  39.6%
     Asymmetry (S1 - S2):        +4.4% (S1 converges more)
 
-    Asymmetry by Algorithm Pair (top 10 by Both convergence):
+    Asymmetry by Algorithm Pair (all 25, sorted by Both convergence):
     Algo Pair             S1      S2      Asymmetry
     etc/etc               100.0%   100.0%   +0.0%
     etc/ucb               100.0%   89.8%   +10.2%
@@ -133,6 +133,21 @@ Convergence threshold: 0.9
     greedy/etc            34.6%   100.0%   -65.4%
     greedy/greedy         34.5%   30.3%   +4.2%
     thompson/ucb          0.3%   61.9%   -61.6%
+    thompson/etc          0.2%   100.0%   -99.8%
+    ucb/thompson          86.4%   0.1%   +86.3%
+    etc/thompson          100.0%   0.0%   +100.0%
+    thompson/thompson     0.1%   0.0%   +0.1%
+    etc/exp3              100.0%   0.0%   +100.0%
+    exp3/etc              0.0%   100.0%   -100.0%
+    exp3/exp3             0.0%   0.0%   +0.0%
+    exp3/greedy           0.0%   6.2%   -6.2%
+    exp3/thompson         0.0%   0.0%   +0.0%
+    exp3/ucb              0.0%   36.2%   -36.2%
+    greedy/exp3           33.6%   0.0%   +33.6%
+    greedy/thompson       31.5%   0.0%   +31.5%
+    thompson/exp3         0.0%   0.0%   +0.0%
+    thompson/greedy       0.0%   13.9%   -13.9%
+    ucb/exp3              79.4%   0.0%   +79.4%
 
 5.3 Interaction Effects:
 
@@ -154,7 +169,7 @@ Convergence threshold: 0.9
 
 5.4 Stratified Analysis:
 
-    5.4.1 Cooperation Mode Effect within Algorithm Pairs (top 10):
+    5.4.1 Cooperation Mode Effect within Algorithm Pairs (all 25):
     (Does cooperation help all algorithms equally?)
 
     etc/etc             :
@@ -197,6 +212,66 @@ Convergence threshold: 0.9
       competitive    :   0.2% (n=1,200)
       cooperative    :   0.8% (n=1,200)
       partial        :   0.1% (n=3,600)
+    thompson/etc        :
+      competitive    :   0.0% (n=1,200)
+      cooperative    :   0.8% (n=1,200)
+      partial        :   0.1% (n=3,600)
+    ucb/thompson        :
+      competitive    :   0.0% (n=1,200)
+      cooperative    :   0.2% (n=1,200)
+      partial        :   0.1% (n=3,600)
+    etc/thompson        :
+      competitive    :   0.0% (n=1,200)
+      cooperative    :   0.2% (n=1,200)
+      partial        :   0.0% (n=3,600)
+    thompson/thompson   :
+      competitive    :   0.0% (n=1,200)
+      cooperative    :   0.0% (n=1,200)
+      partial        :   0.1% (n=3,600)
+    etc/exp3            :
+      competitive    :   0.0% (n=1,200)
+      cooperative    :   0.0% (n=1,200)
+      partial        :   0.0% (n=3,600)
+    exp3/etc            :
+      competitive    :   0.0% (n=1,200)
+      cooperative    :   0.0% (n=1,200)
+      partial        :   0.0% (n=3,600)
+    exp3/exp3           :
+      competitive    :   0.0% (n=1,200)
+      cooperative    :   0.0% (n=1,200)
+      partial        :   0.0% (n=3,600)
+    exp3/greedy         :
+      competitive    :   0.0% (n=1,200)
+      cooperative    :   0.0% (n=1,200)
+      partial        :   0.0% (n=3,600)
+    exp3/thompson       :
+      competitive    :   0.0% (n=1,200)
+      cooperative    :   0.0% (n=1,200)
+      partial        :   0.0% (n=3,600)
+    exp3/ucb            :
+      competitive    :   0.0% (n=1,200)
+      cooperative    :   0.0% (n=1,200)
+      partial        :   0.0% (n=3,600)
+    greedy/exp3         :
+      competitive    :   0.0% (n=1,200)
+      cooperative    :   0.0% (n=1,200)
+      partial        :   0.0% (n=3,600)
+    greedy/thompson     :
+      competitive    :   0.0% (n=1,200)
+      cooperative    :   0.0% (n=1,200)
+      partial        :   0.0% (n=3,600)
+    thompson/exp3       :
+      competitive    :   0.0% (n=1,200)
+      cooperative    :   0.0% (n=1,200)
+      partial        :   0.0% (n=3,600)
+    thompson/greedy     :
+      competitive    :   0.0% (n=1,200)
+      cooperative    :   0.0% (n=1,200)
+      partial        :   0.0% (n=3,600)
+    ucb/exp3            :
+      competitive    :   0.0% (n=1,200)
+      cooperative    :   0.0% (n=1,200)
+      partial        :   0.0% (n=3,600)
 
     5.4.2 Prior Knowledge Effect within Grid Sizes:
     (Does prior help more with larger action spaces?)

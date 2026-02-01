@@ -1406,10 +1406,10 @@ def generate_report(results: Dict[str, Any], analyses: Dict[str, Any], output_di
     report.append(f"    Asymmetry (S1 - S2):        {asymmetry:+.1%} {'(S1 converges more)' if asymmetry > 0 else '(S2 converges more)'}")
     
     # Show asymmetry by factor
-    report.append(f"\n    Asymmetry by Algorithm Pair (top 10 by Both convergence):")
+    report.append(f"\n    Asymmetry by Algorithm Pair (all 25, sorted by Both convergence):")
     report.append(f"    {'Algo Pair':20s}  S1      S2      Asymmetry")
     sorted_algos = sorted(conv['by_algorithm'].items(), key=lambda x: x[1]['both_rate'], reverse=True)
-    for algo, data in sorted_algos[:10]:
+    for algo, data in sorted_algos:
         s1 = data['s1_rate']
         s2 = data['s2_rate']
         asym = s1 - s2
@@ -1433,17 +1433,17 @@ def generate_report(results: Dict[str, Any], analyses: Dict[str, Any], output_di
     
     report.append(f"\n5.4 Stratified Analysis:")
     
-    # Cooperation effect by algorithm (show top 10 algos)
+    # Cooperation effect by algorithm (show ALL 25 algos)
     if 'coop_by_algo' in mech['stratified']:
-        report.append(f"\n    5.4.1 Cooperation Mode Effect within Algorithm Pairs (top 10):")
+        report.append(f"\n    5.4.1 Cooperation Mode Effect within Algorithm Pairs (all 25):")
         report.append(f"    (Does cooperation help all algorithms equally?)")
         report.append(f"")
         
-        # Get top 10 algos by overall convergence
-        top_algos = sorted(conv['by_algorithm'].items(), key=lambda x: x[1]['both_rate'], reverse=True)[:10]
-        top_algo_names = [a[0] for a in top_algos]
+        # Get ALL 25 algos sorted by overall convergence
+        all_algos = sorted(conv['by_algorithm'].items(), key=lambda x: x[1]['both_rate'], reverse=True)
+        all_algo_names = [a[0] for a in all_algos]
         
-        for algo in top_algo_names:
+        for algo in all_algo_names:
             algo_data = [d for d in mech['stratified']['coop_by_algo'] if d['algo_pair'] == algo]
             if algo_data:
                 report.append(f"    {algo:20s}:")
