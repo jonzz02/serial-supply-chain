@@ -27,9 +27,8 @@ GRID_SIZE = ["coarse", "medium", "fine"]
 # Options:
 #   - "random": Q-tables initialized randomly (default behavior)
 #   - "benchmark": Q-tables seeded towards centralized benchmark optimum (s1*, s2*)
-# NOTE: Nested design to avoid redundancy:
-#   - prior_knowledge="demand_known" → always uses init_mode="random" (prior handles init)
-#   - prior_knowledge="none" → tests both init_mode="random" and init_mode="benchmark"
+# NOTE: Full factorial design - testing all combinations of prior_knowledge × init_mode
+#   to examine potential interaction effects between demand knowledge and action initialization
 INIT_MODE = ["random", "benchmark"]
 
 # Cooperation modes: how agents consider costs in their reward signal.
@@ -51,73 +50,41 @@ def create_master_treatment_grid() -> List[TreatmentConfig]:
                    else [("greedy", "greedy"), ("ucb", "ucb"), ("greedy", "ucb"), ("ucb", "greedy")])
     treatments = []
     
-    # Nested design (no redundant treatments):
-    # - prior_knowledge="demand_known" → always init_mode="random" (prior handles initialization)
-    # - prior_knowledge="none" → test both init_mode="random" and init_mode="benchmark"
+    # Full factorial design: all combinations of prior_knowledge × init_mode
+    # This allows us to examine potential interaction effects between these mechanisms
     
     # competitive and cooperative modes
-    for (agent_r, agent_s), grid_size, cooperation_mode in product(
-        agent_pairs, GRID_SIZE, COOPERATION_MODE
+    for (agent_r, agent_s), grid_size, cooperation_mode, prior_knowledge, init_mode in product(
+        agent_pairs, GRID_SIZE, COOPERATION_MODE, PRIOR_KNOWLEDGE, INIT_MODE
     ):
         grid_params = GRID_SIZE_MAP[grid_size]
         
-        # Case 1: prior_knowledge="none" with both init modes
-        for init_mode in INIT_MODE:
-            treatment = TreatmentConfig(
-                agent_retailer=agent_r,
-                agent_supplier=agent_s,
-                s_lower=grid_params["s_lower"],
-                s_upper=grid_params["s_upper"],
-                s_step=grid_params["s_step"],
-                init_mode=init_mode,
-                prior_knowledge="none",
-                cooperation_mode=cooperation_mode,
-            )
-            treatments.append(treatment)
-        
-        # Case 2: prior_knowledge="demand_known" with random init only
         treatment = TreatmentConfig(
             agent_retailer=agent_r,
             agent_supplier=agent_s,
             s_lower=grid_params["s_lower"],
             s_upper=grid_params["s_upper"],
             s_step=grid_params["s_step"],
-            init_mode="random",
-            prior_knowledge="demand_known",
+            init_mode=init_mode,
+            prior_knowledge=prior_knowledge,
             cooperation_mode=cooperation_mode,
         )
         treatments.append(treatment)
     
     # partial mode with varying beta
-    for (agent_r, agent_s), grid_size, beta in product(
-        agent_pairs, GRID_SIZE, COOP_BETAS
+    for (agent_r, agent_s), grid_size, beta, prior_knowledge, init_mode in product(
+        agent_pairs, GRID_SIZE, COOP_BETAS, PRIOR_KNOWLEDGE, INIT_MODE
     ):
         grid_params = GRID_SIZE_MAP[grid_size]
         
-        # Case 1: prior_knowledge="none" with both init modes
-        for init_mode in INIT_MODE:
-            treatment = TreatmentConfig(
-                agent_retailer=agent_r,
-                agent_supplier=agent_s,
-                s_lower=grid_params["s_lower"],
-                s_upper=grid_params["s_upper"],
-                s_step=grid_params["s_step"],
-                init_mode=init_mode,
-                prior_knowledge="none",
-                cooperation_mode="partial",
-                cooperation_beta=beta,
-            )
-            treatments.append(treatment)
-        
-        # Case 2: prior_knowledge="demand_known" with random init only
         treatment = TreatmentConfig(
             agent_retailer=agent_r,
             agent_supplier=agent_s,
             s_lower=grid_params["s_lower"],
             s_upper=grid_params["s_upper"],
             s_step=grid_params["s_step"],
-            init_mode="random",
-            prior_knowledge="demand_known",
+            init_mode=init_mode,
+            prior_knowledge=prior_knowledge,
             cooperation_mode="partial",
             cooperation_beta=beta,
         )
@@ -195,6 +162,9 @@ def run_master_experiment(
                         "prior_knowledge": treatment.prior_knowledge,
                         "cooperation_mode": treatment.cooperation_mode,
                         "cooperation_beta": treatment.cooperation_beta,
+                        "s_lower": treatment.s_lower,
+                        "s_upper": treatment.s_upper,
+                        "s_step": treatment.s_step,
                     })
                     all_runs.append(m)
                 
