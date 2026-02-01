@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.colors import LinearSegmentedColormap
 from scipy import stats
+from scipy.stats.contingency import association
 
 
 # Plot style configuration
@@ -401,11 +402,14 @@ def analyze_mechanism_effects(results: Dict[str, Any]) -> Dict[str, Any]:
     
     analysis = {
         'main_effects': {},
+        'main_effects_separate': {},  # S1, S2, Both separately
+        'effect_sizes': {},
         'interactions': {},
+        'stratified': {},
         'rankings': {},
     }
     
-    # Main effects - convergence rate by each factor
+    # Main effects - SEPARATE analysis for S1, S2, and Both
     factors = ['cooperation_mode', 'prior_knowledge', 'init_mode', 'grid_size', 
                'agent_retailer', 'agent_supplier', 'algo_pair']
     
@@ -413,27 +417,74 @@ def analyze_mechanism_effects(results: Dict[str, Any]) -> Dict[str, Any]:
         if factor not in runs.columns:
             continue
         
-        grouped = runs.groupby(factor).agg({
-            'both_converged': ['mean', 'std', 'count'],
-            'train_total_regret': ['mean', 'std'],
-        })
-        grouped.columns = ['conv_mean', 'conv_std', 'n', 'regret_mean', 'regret_std']
+        # Analyze all three outcomes separately
+        analysis['main_effects_separate'][factor] = {}
         
-        # Chi-square test for convergence
-        contingency = pd.crosstab(runs[factor], runs['both_converged'])
-        if len(contingency) > 1 and len(contingency.columns) > 1:
-            chi2, p_value, dof, expected = stats.chi2_contingency(contingency)
-        else:
-            chi2, p_value = 0, 1.0
+        for outcome in ['s1_converged', 's2_converged', 'both_converged']:
+            grouped = runs.groupby(factor).agg({
+                outcome: ['mean', 'std', 'count'],
+                'train_total_regret': ['mean', 'std'],
+            })
+            grouped.columns = ['conv_mean', 'conv_std', 'n', 'regret_mean', 'regret_std']
+            
+            # Chi-square test and Cramér's V effect size
+            contingency = pd.crosstab(runs[factor], runs[outcome])
+            if len(contingency) > 1 and len(contingency.columns) > 1:
+                chi2, p_value, dof, expected = stats.chi2_contingency(contingency)
+                
+                # Cramér's V: effect size for chi-square
+                n = contingency.sum().sum()
+                min_dim = min(contingency.shape[0], contingency.shape[1]) - 1
+                cramers_v = np.sqrt(chi2 / (n * min_dim)) if min_dim > 0 else 0
+            else:
+                chi2, p_value, cramers_v = 0, 1.0, 0
+            
+            analysis['main_effects_separate'][factor][outcome] = {
+                'levels': grouped.to_dict('index'),
+                'chi2': chi2,
+                'p_value': p_value,
+                'cramers_v': cramers_v,
+                'significant': p_value < 0.05,
+            }
         
-        analysis['main_effects'][factor] = {
-            'levels': grouped.to_dict('index'),
-            'chi2': chi2,
-            'p_value': p_value,
-            'significant': p_value < 0.05,
-        }
+        # Keep "both_converged" as main effect for backward compatibility
+        analysis['main_effects'][factor] = analysis['main_effects_separate'][factor]['both_converged']
     
-    # Interaction: Algorithm x Cooperation Mode
+    # Effect size summary
+    for factor in factors:
+        if factor in analysis['main_effects_separate']:
+            analysis['effect_sizes'][factor] = {
+                outcome: analysis['main_effects_separate'][factor][outcome]['cramers_v']
+                for outcome in ['s1_converged', 's2_converged', 'both_converged']
+            }
+    
+    # Stratified analysis: Cooperation effect within each algorithm pair
+    if 'cooperation_mode' in runs.columns and 'algo_pair' in runs.columns:
+        stratified_coop = []
+        for algo in runs['algo_pair'].unique():
+            algo_data = runs[runs['algo_pair'] == algo]
+            coop_effect = algo_data.groupby('cooperation_mode')['both_converged'].agg(['mean', 'count'])
+            coop_effect = coop_effect.reset_index()
+            coop_effect['algo_pair'] = algo
+            stratified_coop.append(coop_effect)
+        
+        if stratified_coop:
+            analysis['stratified']['coop_by_algo'] = pd.concat(stratified_coop).to_dict('records')
+    
+    # Stratified: Prior knowledge effect within each grid size
+    if 'prior_knowledge' in runs.columns and 'grid_size' in runs.columns:
+        stratified_prior = []
+        for grid in runs['grid_size'].unique():
+            grid_data = runs[runs['grid_size'] == grid]
+            prior_effect = grid_data.groupby('prior_knowledge')['both_converged'].agg(['mean', 'count'])
+            prior_effect = prior_effect.reset_index()
+            prior_effect['grid_size'] = grid
+            stratified_prior.append(prior_effect)
+        
+        if stratified_prior:
+            analysis['stratified']['prior_by_grid'] = pd.concat(stratified_prior).to_dict('records')
+    
+    # Interaction: Algorithm x Cooperation Mode (extended with stats)
     if 'cooperation_mode' in runs.columns and 'algo_pair' in runs.columns:
         interaction = runs.groupby(['algo_pair', 'cooperation_mode'])['both_converged'].agg(['mean', 'count'])
         interaction.columns = ['rate', 'n']
@@ -444,6 +495,21 @@ def analyze_mechanism_effects(results: Dict[str, Any]) -> Dict[str, Any]:
         interaction = runs.groupby(['prior_knowledge', 'init_mode'])['both_converged'].agg(['mean', 'count'])
         interaction.columns = ['rate', 'n']
         analysis['interactions']['prior_init'] = interaction.reset_index().to_dict('records')
+    
+    # NEW: Interaction - Prior x Grid
+    if 'prior_knowledge' in runs.columns and 'grid_size' in runs.columns:
+        interaction = runs.groupby(['prior_knowledge', 'grid_size'])['both_converged'].agg(['mean', 'count'])
+        interaction.columns = ['rate', 'n']
+        analysis['interactions']['prior_grid'] = interaction.reset_index().to_dict('records')
+    
+    # NEW: Interaction - Algo x Grid (is grid size effect algo-specific?)
+    if 'algo_pair' in runs.columns and 'grid_size' in runs.columns:
+        # Only for top algos to keep it manageable
+        top_algos = runs.groupby('algo_pair')['both_converged'].mean().nlargest(10).index
+        algo_grid_data = runs[runs['algo_pair'].isin(top_algos)]
+        interaction = algo_grid_data.groupby(['algo_pair', 'grid_size'])['both_converged'].agg(['mean', 'count'])
+        interaction.columns = ['rate', 'n']
+        analysis['interactions']['algo_grid_top10'] = interaction.reset_index().to_dict('records')
     
     # Rankings
     if 'treatment_full' in runs.columns:
@@ -1312,22 +1378,99 @@ def generate_report(results: Dict[str, Any], analyses: Dict[str, Any], output_di
     report.append("5. WHICH MECHANISMS INFLUENCE CONVERGENCE?")
     report.append("=" * 80)
     
-    report.append(f"\n5.1 Statistical Significance of Factors:")
+    report.append(f"\n5.1 Effect Sizes (Cramér's V) for Both-Agent Convergence:")
+    report.append(f"    Factor                  Cramér's V    χ²        p-value   Interpretation")
+    report.append(f"    " + "-" * 76)
+    
+    # Interpretation helper
+    def interpret_cramers_v(v):
+        if v < 0.1: return "negligible"
+        elif v < 0.3: return "small"
+        elif v < 0.5: return "medium"
+        else: return "large"
+    
     for factor, data in mech['main_effects'].items():
         if factor in ['agent_retailer', 'agent_supplier']:
             continue
-        sig = "***" if data['p_value'] < 0.001 else ("**" if data['p_value'] < 0.01 else ("*" if data['p_value'] < 0.05 else ""))
-        report.append(f"    {factor:20s}: χ²={data['chi2']:.1f}, p={data['p_value']:.4f} {sig}")
+        v = data.get('cramers_v', 0)
+        sig = "***" if data['p_value'] < 0.001 else ("**" if data['p_value'] < 0.01 else ("*" if data['p_value'] < 0.05 else "n.s."))
+        interp = interpret_cramers_v(v)
+        report.append(f"    {factor:20s}    {v:6.3f}    {data['chi2']:>9.1f}   {data['p_value']:.4f} {sig:4s}  {interp}")
     
-    report.append(f"\n5.2 Top 10 Treatments by Convergence Rate:")
+    report.append(f"\n5.2 Asymmetry Analysis (S1 vs S2 Convergence):")
+    s1_rate = conv['overall']['s1_convergence_rate']
+    s2_rate = conv['overall']['s2_convergence_rate']
+    asymmetry = s1_rate - s2_rate
+    report.append(f"    S1 (Retailer) convergence:  {s1_rate:.1%}")
+    report.append(f"    S2 (Supplier) convergence:  {s2_rate:.1%}")
+    report.append(f"    Asymmetry (S1 - S2):        {asymmetry:+.1%} {'(S1 converges more)' if asymmetry > 0 else '(S2 converges more)'}")
+    
+    # Show asymmetry by factor
+    report.append(f"\n    Asymmetry by Algorithm Pair (top 10 by Both convergence):")
+    report.append(f"    {'Algo Pair':20s}  S1      S2      Asymmetry")
+    sorted_algos = sorted(conv['by_algorithm'].items(), key=lambda x: x[1]['both_rate'], reverse=True)
+    for algo, data in sorted_algos[:10]:
+        s1 = data['s1_rate']
+        s2 = data['s2_rate']
+        asym = s1 - s2
+        report.append(f"    {algo:20s}  {s1:.1%}   {s2:.1%}   {asym:+.1%}")
+    
+    report.append(f"\n5.3 Interaction Effects:")
+    
+    # Prior x Init interaction
+    if 'prior_init' in mech['interactions']:
+        report.append(f"\n    5.3.1 Prior Knowledge × Initialization Mode:")
+        report.append(f"    {'Prior':15s}  {'Init':10s}  Conv. Rate    n")
+        for item in mech['interactions']['prior_init']:
+            report.append(f"    {item['prior_knowledge']:15s}  {item['init_mode']:10s}  {item['rate']:>8.1%}    {item['n']:>6,}")
+    
+    # Prior x Grid interaction
+    if 'prior_grid' in mech['interactions']:
+        report.append(f"\n    5.3.2 Prior Knowledge × Grid Size:")
+        report.append(f"    {'Prior':15s}  {'Grid':10s}  Conv. Rate    n")
+        for item in mech['interactions']['prior_grid']:
+            report.append(f"    {item['prior_knowledge']:15s}  {item['grid_size']:10s}  {item['rate']:>8.1%}    {item['n']:>6,}")
+    
+    report.append(f"\n5.4 Stratified Analysis:")
+    
+    # Cooperation effect by algorithm (show top 10 algos)
+    if 'coop_by_algo' in mech['stratified']:
+        report.append(f"\n    5.4.1 Cooperation Mode Effect within Algorithm Pairs (top 10):")
+        report.append(f"    (Does cooperation help all algorithms equally?)")
+        report.append(f"")
+        
+        # Get top 10 algos by overall convergence
+        top_algos = sorted(conv['by_algorithm'].items(), key=lambda x: x[1]['both_rate'], reverse=True)[:10]
+        top_algo_names = [a[0] for a in top_algos]
+        
+        for algo in top_algo_names:
+            algo_data = [d for d in mech['stratified']['coop_by_algo'] if d['algo_pair'] == algo]
+            if algo_data:
+                report.append(f"    {algo:20s}:")
+                for d in algo_data:
+                    report.append(f"      {d['cooperation_mode']:15s}: {d['mean']:>6.1%} (n={int(d['count']):,})")
+    
+    # Prior effect by grid size
+    if 'prior_by_grid' in mech['stratified']:
+        report.append(f"\n    5.4.2 Prior Knowledge Effect within Grid Sizes:")
+        report.append(f"    (Does prior help more with larger action spaces?)")
+        report.append(f"")
+        for grid in ['coarse', 'medium', 'fine']:
+            grid_data = [d for d in mech['stratified']['prior_by_grid'] if d['grid_size'] == grid]
+            if grid_data:
+                report.append(f"    {grid:10s}:")
+                for d in grid_data:
+                    report.append(f"      {d['prior_knowledge']:15s}: {d['mean']:>6.1%} (n={int(d['count']):,})")
+    
+    report.append(f"\n5.5 Top 10 Treatments by Convergence Rate:")
     for i, t in enumerate(mech['rankings']['top_by_convergence'][:10], 1):
         report.append(f"    {i:2d}. {t['treatment'][:50]:50s} {t['conv_rate']:.1%}")
     
-    report.append(f"\n5.3 Bottom 10 Treatments by Convergence Rate:")
+    report.append(f"\n5.6 Bottom 10 Treatments by Convergence Rate:")
     for i, t in enumerate(mech['rankings']['bottom_by_convergence'][:10], 1):
         report.append(f"    {i:2d}. {t['treatment'][:50]:50s} {t['conv_rate']:.1%}")
     
-    report.append(f"\n5.4 Top 10 Treatments by Total Regret (lowest = best):")
+    report.append(f"\n5.7 Top 10 Treatments by Total Regret (lowest = best):")
     for i, t in enumerate(mech['rankings']['top_by_regret'][:10], 1):
         report.append(f"    {i:2d}. {t['treatment'][:50]:50s} {t['regret']:,.0f}")
     
