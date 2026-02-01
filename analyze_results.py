@@ -125,9 +125,30 @@ def preprocess_data(results: Dict[str, Any]) -> Dict[str, Any]:
         runs['grid_size'] = runs['s_upper'].map(
             lambda x: 'coarse' if x <= 40 else ('medium' if x <= 60 else 'fine')
         )
-        if summary is not None:
+        if summary is not None and 's_upper' in summary.columns:
             summary['grid_size'] = summary['s_upper'].map(
                 lambda x: 'coarse' if x <= 40 else ('medium' if x <= 60 else 'fine')
+            )
+    else:
+        # Extract s_upper from treatment name (format: algo1_algo2_s0-XX-1)
+        def extract_s_upper(treatment_name):
+            try:
+                parts = treatment_name.split('_')
+                s_part = [p for p in parts if p.startswith('s')][0]  # e.g., "s0-40-1"
+                s_upper = int(s_part.split('-')[1])
+                return s_upper
+            except:
+                return None
+        
+        runs['s_upper'] = runs['treatment'].apply(extract_s_upper)
+        runs['grid_size'] = runs['s_upper'].map(
+            lambda x: 'coarse' if x <= 40 else ('medium' if x <= 60 else 'fine') if x is not None else None
+        )
+        
+        if summary is not None:
+            summary['s_upper'] = summary['treatment'].apply(extract_s_upper)
+            summary['grid_size'] = summary['s_upper'].map(
+                lambda x: 'coarse' if x <= 40 else ('medium' if x <= 60 else 'fine') if x is not None else None
             )
     
     # Ensure proper types
@@ -1210,13 +1231,37 @@ def generate_report(results: Dict[str, Any], analyses: Dict[str, Any], output_di
     
     report.append(f"\n2.2 Convergence by Algorithm Pair:")
     sorted_algos = sorted(conv['by_algorithm'].items(), key=lambda x: x[1]['both_rate'], reverse=True)
-    for algo, data in sorted_algos[:10]:
+    for algo, data in sorted_algos:
         report.append(f"    {algo:20s}: {data['both_rate']:.1%} (n={data['n_runs']:,})")
     
     report.append(f"\n2.3 Convergence by Cooperation Mode:")
     if 'cooperation_mode' in conv['by_mechanism']:
         for mode, data in conv['by_mechanism']['cooperation_mode'].items():
             report.append(f"    {mode:15s}: S1={data['s1_converged']:.1%}, S2={data['s2_converged']:.1%}, Both={data['both_converged']:.1%}")
+    
+    report.append(f"\n2.4 Convergence by Action Grid Size:")
+    if 'grid_size' in conv['by_mechanism']:
+        grid_order = ['coarse', 'medium', 'fine']
+        for grid_size in grid_order:
+            if grid_size in conv['by_mechanism']['grid_size']:
+                data = conv['by_mechanism']['grid_size'][grid_size]
+                # Get the actual grid bounds from the data
+                runs = results['runs']
+                grid_mask = runs['grid_size'] == grid_size
+                if grid_mask.sum() > 0:
+                    s_upper = runs[grid_mask]['s_upper'].iloc[0]
+                    n_actions = s_upper + 1  # since s_lower is always 0
+                    report.append(f"    {grid_size:10s} (0-{s_upper:2d}, {n_actions} actions): S1={data['s1_converged']:.1%}, S2={data['s2_converged']:.1%}, Both={data['both_converged']:.1%}")
+    
+    report.append(f"\n2.5 Convergence by Prior Knowledge:")
+    if 'prior_knowledge' in conv['by_mechanism']:
+        for prior, data in conv['by_mechanism']['prior_knowledge'].items():
+            report.append(f"    {prior:15s}: S1={data['s1_converged']:.1%}, S2={data['s2_converged']:.1%}, Both={data['both_converged']:.1%}")
+    
+    report.append(f"\n2.6 Convergence by Initialization Mode:")
+    if 'init_mode' in conv['by_mechanism']:
+        for init, data in conv['by_mechanism']['init_mode'].items():
+            report.append(f"    {init:15s}: S1={data['s1_converged']:.1%}, S2={data['s2_converged']:.1%}, Both={data['both_converged']:.1%}")
     
     # Q2: Convergence Speed
     report.append("\n" + "=" * 80)
@@ -1285,43 +1330,6 @@ def generate_report(results: Dict[str, Any], analyses: Dict[str, Any], output_di
     report.append(f"\n5.4 Top 10 Treatments by Total Regret (lowest = best):")
     for i, t in enumerate(mech['rankings']['top_by_regret'][:10], 1):
         report.append(f"    {i:2d}. {t['treatment'][:50]:50s} {t['regret']:,.0f}")
-    
-    # Key Findings
-    report.append("\n" + "=" * 80)
-    report.append("6. KEY FINDINGS & CONCLUSIONS")
-    report.append("=" * 80)
-    
-    # Determine best algorithm pair
-    best_algo = sorted_algos[0]
-    worst_algo = sorted_algos[-1]
-    
-    # Best cooperation mode
-    best_coop = max(conv['by_mechanism'].get('cooperation_mode', {}).items(), 
-                   key=lambda x: x[1]['both_converged'], default=('N/A', {'both_converged': 0}))
-    
-    report.append(f"""
-6.1 Convergence:
-    - Overall {conv['overall']['both_convergence_rate']:.1%} of runs achieve both-agent convergence
-    - Best algorithm pair: {best_algo[0]} ({best_algo[1]['both_rate']:.1%})
-    - Worst algorithm pair: {worst_algo[0]} ({worst_algo[1]['both_rate']:.1%})
-    - Best cooperation mode: {best_coop[0]} ({best_coop[1]['both_converged']:.1%})
-
-6.2 Solution Quality:
-    - {solution['overall']['to_central_rate']:.1%} of converged runs reach the centralized optimum
-    - {solution['overall']['to_ne_rate']:.1%} of converged runs reach a Nash equilibrium
-    - Mean distance to central optimum: {solution['distance_analysis'].get('to_central', {}).get('mean', 0):.1f}
-
-6.3 Key Mechanism Effects:
-""")
-    
-    # List significant factors
-    significant_factors = [(f, d) for f, d in mech['main_effects'].items() 
-                          if d['significant'] and f not in ['agent_retailer', 'agent_supplier']]
-    if significant_factors:
-        for factor, data in significant_factors:
-            report.append(f"    - {factor.replace('_', ' ').title()} significantly affects convergence (p={data['p_value']:.4f})")
-    else:
-        report.append("    - No individual factors showed statistical significance")
     
     report.append("\n" + "=" * 80)
     report.append("END OF REPORT")

@@ -5,6 +5,17 @@ results_*/
 *.png
 *.pdf
 
+# Exception: Include results_full_factorial and analysis_full_factorial
+!results_full_factorial/
+!results_full_factorial/**/*.csv
+!results_full_factorial/**/*.png
+!results_full_factorial/**/*.pdf
+
+!analysis_full_factorial/
+!analysis_full_factorial/**/*.csv
+!analysis_full_factorial/**/*.png
+!analysis_full_factorial/**/*.pdf
+
 # Python
 __pycache__/
 *.py[cod]
