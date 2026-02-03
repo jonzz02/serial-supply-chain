@@ -2,7 +2,7 @@
 SUPPLY CHAIN COORDINATION EXPERIMENT ANALYSIS REPORT
 ================================================================================
 
-Generated: 2026-02-01 13:37:36
+Generated: 2026-02-02 21:50:23
 Results directory: results_full_factorial
 
 ================================================================================

@@ -727,6 +727,237 @@ def plot_convergence_speed(results: Dict[str, Any], speed_analysis: Dict, output
     plt.close()
 
 
+def plot_convergence_by_grid_size(results: Dict[str, Any], conv_analysis: Dict, speed_analysis: Dict,
+                                  output_dir: str):
+    """Create selection graphs showing convergence behavior by action grid size."""
+    runs = results['runs']
+    if 'grid_size' not in runs.columns:
+        return
+
+    # Order grid sizes consistently (coarse -> medium -> fine)
+    grid_order = ['coarse', 'medium', 'fine']
+    runs_grid = runs[runs['grid_size'].isin(grid_order)].copy()
+    if len(runs_grid) == 0:
+        return
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 12))
+
+    # 1. Convergence rates by grid size (S1, S2, Both)
+    ax = axes[0, 0]
+    x = np.arange(len(grid_order))
+    width = 0.25
+
+    s1_rates = [conv_analysis['by_mechanism']['grid_size'].get(g, {}).get('s1_converged', 0) for g in grid_order]
+    s2_rates = [conv_analysis['by_mechanism']['grid_size'].get(g, {}).get('s2_converged', 0) for g in grid_order]
+    both_rates = [conv_analysis['by_mechanism']['grid_size'].get(g, {}).get('both_converged', 0) for g in grid_order]
+
+    ax.bar(x - width, s1_rates, width, label='S1 (Retailer)', color=COLORS['primary'])
+    ax.bar(x, s2_rates, width, label='S2 (Supplier)', color=COLORS['secondary'])
+    ax.bar(x + width, both_rates, width, label='Both', color=COLORS['tertiary'])
+
+    ax.set_xticks(x)
+    ax.set_xticklabels([g.capitalize() for g in grid_order])
+    ax.set_ylabel('Convergence Rate')
+    ax.set_title('Convergence Rate by Grid Size', fontweight='bold')
+    ax.legend()
+    ax.set_ylim(0, 1.05)
+    ax.axhline(y=0.5, color='gray', linestyle='--', alpha=0.5)
+
+    # Add value labels on bars
+    for i, (s1, s2, both) in enumerate(zip(s1_rates, s2_rates, both_rates)):
+        for j, (val, offset) in enumerate([(s1, -width), (s2, 0), (both, width)]):
+            if val > 0.05:
+                ax.text(i + offset, val + 0.02, f'{val:.0%}', ha='center', va='bottom', fontsize=8)
+
+    # 2. Convergence rate by grid size × cooperation mode
+    ax = axes[0, 1]
+    if 'cooperation_mode' in runs_grid.columns:
+        coop_modes = sorted(runs_grid['cooperation_mode'].unique())
+        x = np.arange(len(grid_order))
+        width = 0.8 / max(len(coop_modes), 1)
+
+        for i, mode in enumerate(coop_modes):
+            offset = (i - len(coop_modes) / 2 + 0.5) * width
+            group = runs_grid[runs_grid['cooperation_mode'] == mode]
+            both_rates_coop = [
+                group[group['grid_size'] == g]['both_converged'].mean() if len(group[group['grid_size'] == g]) > 0 else 0
+                for g in grid_order
+            ]
+            color = COLORS['cooperation'].get(mode, COLORS['neutral'])
+            bars = ax.bar(x + offset, both_rates_coop, width, label=mode.capitalize(), color=color)
+
+        ax.set_xticks(x)
+        ax.set_xticklabels([g.capitalize() for g in grid_order])
+        ax.set_ylabel('Both-Agent Convergence Rate')
+        ax.set_title('Convergence Rate by Grid Size × Cooperation Mode', fontweight='bold')
+        ax.legend()
+        ax.set_ylim(0, 1.05)
+    else:
+        ax.text(0.5, 0.5, 'No cooperation_mode data', ha='center', va='center', transform=ax.transAxes)
+
+    # 3. Convergence time by grid size (among converged runs)
+    ax = axes[1, 0]
+    converged = runs_grid[runs_grid['both_converged'] == True]
+    if len(converged) > 0 and 's1_conv_time' in converged.columns:
+        x = np.arange(len(grid_order))
+        width = 0.35
+
+        s1_means = []
+        s2_means = []
+        s1_stds = []
+        s2_stds = []
+        for g in grid_order:
+            sub = converged[converged['grid_size'] == g]
+            s1_t = sub['s1_conv_time'].dropna()
+            s2_t = sub['s2_conv_time'].dropna()
+            s1_means.append(s1_t.mean() if len(s1_t) > 0 else 0)
+            s2_means.append(s2_t.mean() if len(s2_t) > 0 else 0)
+            s1_stds.append(s1_t.std() if len(s1_t) > 1 else 0)
+            s2_stds.append(s2_t.std() if len(s2_t) > 1 else 0)
+
+        ax.bar(x - width/2, s1_means, width, yerr=s1_stds, capsize=3, label='S1', color=COLORS['primary'])
+        ax.bar(x + width/2, s2_means, width, yerr=s2_stds, capsize=3, label='S2', color=COLORS['secondary'])
+        ax.set_xticks(x)
+        ax.set_xticklabels([g.capitalize() for g in grid_order])
+        ax.set_ylabel('Mean Convergence Time (rounds)')
+        ax.set_title('Convergence Time by Grid Size (converged runs only)', fontweight='bold')
+        ax.legend()
+    else:
+        ax.text(0.5, 0.5, 'No converged runs', ha='center', va='center', transform=ax.transAxes)
+
+    # 4. Heatmap: algorithm pair × grid size for both_convergence_rate
+    ax = axes[1, 1]
+    algos = ['greedy', 'ucb', 'thompson', 'exp3', 'etc']
+    grid_labels = [g.capitalize() for g in grid_order]
+    heatmap_data = np.zeros((len(algos) * len(algos), len(grid_order)))
+
+    for gi, grid in enumerate(grid_order):
+        grid_runs = runs_grid[runs_grid['grid_size'] == grid]
+        for i, a1 in enumerate(algos):
+            for j, a2 in enumerate(algos):
+                pair = f'{a1}/{a2}'
+                row_idx = i * len(algos) + j
+                pair_data = grid_runs[grid_runs['algo_pair'] == pair]
+                if len(pair_data) > 0:
+                    heatmap_data[row_idx, gi] = pair_data['both_converged'].mean()
+                else:
+                    heatmap_data[row_idx, gi] = np.nan
+
+    # Reshape for 5x5 × 3 grid display: show top algorithm pairs or full matrix
+    # Use algo pairs as rows, grid as columns
+    pair_labels = [f'{a1}/{a2}' for a1 in algos for a2 in algos]
+    im = ax.imshow(heatmap_data, cmap='RdYlGn', vmin=0, vmax=1, aspect='auto')
+    ax.set_xticks(np.arange(len(grid_order)))
+    ax.set_xticklabels(grid_labels)
+    ax.set_yticks(np.arange(len(pair_labels)))
+    ax.set_yticklabels(pair_labels, fontsize=8)
+    ax.set_xlabel('Grid Size')
+    ax.set_ylabel('Algorithm Pair (Retailer/Supplier)')
+    ax.set_title('Both-Agent Convergence Rate by Algorithm Pair × Grid Size', fontweight='bold')
+
+    for i in range(len(pair_labels)):
+        for j in range(len(grid_order)):
+            val = heatmap_data[i, j]
+            text = ax.text(j, i, f'{val:.2f}' if not np.isnan(val) else '-',
+                          ha='center', va='center', fontsize=7,
+                          color='white' if val < 0.5 and not np.isnan(val) else 'black')
+
+    plt.colorbar(im, ax=ax, label='Convergence Rate')
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'convergence_by_grid_size.png'), dpi=150, bbox_inches='tight')
+    plt.close()
+
+
+def plot_convergence_outcome_by_prior_init(results: Dict[str, Any], solution_analysis: Dict, output_dir: str):
+    """Create graph showing to which optimum converged runs landed, by prior_knowledge and init_mode."""
+    runs = results['runs']
+    converged = runs[runs['both_converged'] == True].copy()
+
+    if len(converged) == 0:
+        return
+
+    if 'prior_knowledge' not in converged.columns or 'init_mode' not in converged.columns:
+        return
+
+    if 'converged_to_central' not in converged.columns:
+        return
+
+    # Mutually exclusive categories among converged runs:
+    # - Central optimum: converged_to_central == True
+    # - Nash equilibrium only: converged_to_ne == True and not central
+    # - Other stable: neither central nor NE
+    converged['outcome'] = 'Other stable'
+    converged.loc[converged['converged_to_central'] == True, 'outcome'] = 'Central optimum'
+    ne_mask = (converged['converged_to_ne'] == True) & (converged['converged_to_central'] != True)
+    converged.loc[ne_mask, 'outcome'] = 'Nash equilibrium (not central)'
+
+    # Build combination labels
+    prior_order = sorted(converged['prior_knowledge'].unique(), key=lambda x: (x == 'none', x))
+    init_order = sorted(converged['init_mode'].unique(), key=lambda x: (x == 'random', x))
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+    # 1. Stacked bar chart: prior_knowledge × init_mode
+    ax = axes[0]
+    outcome_order = ['Central optimum', 'Nash equilibrium (not central)', 'Other stable']
+    outcome_colors = {
+        'Central optimum': COLORS['tertiary'],
+        'Nash equilibrium (not central)': COLORS['secondary'],
+        'Other stable': COLORS['neutral'],
+    }
+
+    combinations = [(p, i) for p in prior_order for i in init_order]
+    x_labels = [f"{p}\n{i}" for p, i in combinations]
+    x = np.arange(len(combinations))
+    width = 0.7
+
+    bottom = np.zeros(len(combinations))
+    for outcome in outcome_order:
+        counts = []
+        for p, i in combinations:
+            mask = (converged['prior_knowledge'] == p) & (converged['init_mode'] == i) & (converged['outcome'] == outcome)
+            counts.append(converged.loc[mask].shape[0])
+        totals = [converged[(converged['prior_knowledge'] == p) & (converged['init_mode'] == i)].shape[0] for p, i in combinations]
+        # Proportions (as fraction of converged runs in that prior/init group)
+        proportions = [c / t if t > 0 else 0 for c, t in zip(counts, totals)]
+        ax.bar(x, proportions, width, bottom=bottom, label=outcome, color=outcome_colors[outcome], edgecolor='white', linewidth=0.5)
+        bottom += np.array(proportions)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(x_labels, fontsize=9)
+    ax.set_ylabel('Proportion of converged runs')
+    ax.set_title('Convergence Outcome by Prior Knowledge × Init Mode', fontweight='bold')
+    ax.legend(loc='upper right', fontsize=9)
+    ax.set_ylim(0, 1.05)
+    ax.axhline(y=1.0, color='gray', linestyle='-', alpha=0.3)
+
+    # 2. Grouped bar chart: same data, absolute counts
+    ax = axes[1]
+    bar_width = 0.25
+    for i, outcome in enumerate(outcome_order):
+        counts = []
+        for p, init in combinations:
+            mask = (converged['prior_knowledge'] == p) & (converged['init_mode'] == init) & (converged['outcome'] == outcome)
+            counts.append(converged.loc[mask].shape[0])
+        offset = (i - 1) * bar_width
+        bars = ax.bar(x + offset, counts, bar_width, label=outcome, color=outcome_colors[outcome], edgecolor='white', linewidth=0.5)
+        max_count = max(counts) if counts else 1
+        for bar, c in zip(bars, counts):
+            if c > 0:
+                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max_count * 0.02, f'{c}', ha='center', va='bottom', fontsize=8)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(x_labels, fontsize=9)
+    ax.set_ylabel('Count of converged runs')
+    ax.set_title('Convergence Outcome Counts by Prior Knowledge × Init Mode', fontweight='bold')
+    ax.legend(loc='upper right', fontsize=9)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'convergence_outcome_by_prior_init.png'), dpi=150, bbox_inches='tight')
+    plt.close()
+
+
 def plot_solution_quality(results: Dict[str, Any], solution_analysis: Dict, output_dir: str):
     """Create plot of solution quality analysis."""
     runs = results['runs']
@@ -1530,6 +1761,12 @@ def main():
     
     plot_convergence_speed(results, analyses['speed'], args.output_dir)
     print("  - Convergence speed saved")
+
+    plot_convergence_by_grid_size(results, analyses['convergence'], analyses['speed'], args.output_dir)
+    print("  - Convergence by grid size saved")
+
+    plot_convergence_outcome_by_prior_init(results, analyses['solution'], args.output_dir)
+    print("  - Convergence outcome by prior/init saved")
     
     plot_solution_quality(results, analyses['solution'], args.output_dir)
     print("  - Solution quality saved")
