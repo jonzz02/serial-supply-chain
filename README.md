@@ -1,206 +1,301 @@
 # Serial Supply Chain Coordination Simulation
 
-Mesa-based simulation of a 2-stage serial supply chain where bandit agents (retailer stage 1, supplier stage 2) learn discrete base-stock levels.
+A Mesa-based simulation of a 2-stage serial supply chain where bandit agents (retailer stage 1, supplier stage 2) learn discrete base-stock levels. The project studies whether and how agents converge, to what solutions (Nash equilibria, centralized optimum), and which mechanisms (cooperation mode, prior knowledge, initialization, learning algorithms) influence outcomes.
 
-## Project Scope Questions
+---
 
-This codebase addresses the "Supply Chain Coordination" project:
-- **Do agents converge?** Track `both_convergence_rate` and per-agent convergence metrics
-- **How fast do they converge?** Track `s1_conv_time`, `s2_conv_time` (absolute round indices)
-- **To what solutions?** Compare against Nash equilibria (`converged_to_ne`) and centralized optimum (`converged_to_central`)
-- **Which mechanisms influence convergence?** Cooperation modes (competitive/cooperative/partial), prior knowledge, initialization, action grid design, learning algorithms
+## Table of Contents
 
-## Setup
+- [Requirements & Setup](#requirements--setup)
+- [How to Run the Code](#how-to-run-the-code)
+- [Where Results Are Saved](#where-results-are-saved)
+- [How to Reproduce Results](#how-to-reproduce-results)
+- [Treatment Variables](#treatment-variables)
+- [Output Files & Metrics](#output-files--metrics)
+- [Project Structure](#project-structure)
+- [Optional: Interactive Visualization](#optional-interactive-visualization)
+
+---
+
+## Requirements & Setup
 
 ### Prerequisites
 
-- Python 3.7 or higher
+- **Python 3.8 or higher**
 - pip (Python package installer)
 
 ### Installation
 
-1. **Create a virtual environment** (recommended):
+1. **Clone the repository** (if applicable) and enter the project directory.
+
+2. **Create a virtual environment** (recommended):
    ```bash
    python -m venv venv
    
-   # On Windows
+   # Windows
    venv\Scripts\activate
    
-   # On Linux/Mac
+   # Linux / macOS
    source venv/bin/activate
    ```
 
-2. **Install dependencies**:
+3. **Install dependencies**:
    ```bash
    pip install -r requirements.txt
    ```
 
 ### Verify Installation
 
-You can verify the installation by running a quick test:
+Run a short scenario to confirm everything works:
+
 ```bash
 python run_experiments.py --scenario baseline --s_upper 60 --s_step 5 --n_seeds 5 --rounds 100 --warmup 20 --output_dir results/
 ```
 
-## Quick Start
+You should see progress output and CSV files under `results/`.
+
+---
+
+## How to Run the Code
+
+There are three main entry points.
+
+### 1. Scenario-based experiments (`run_experiments.py`)
+
+Run predefined scenarios (baseline, demand-known prior, benchmark init) with a chosen action grid and seed count. Use this for quick or scenario-focused runs.
 
 ```bash
-# Run full 5×5 algorithm grid for baseline scenario
+# Baseline: random init, no prior (full 5×5 algorithm grid)
 python run_experiments.py --scenario baseline --s_upper 60 --s_step 1 --full_grid --n_seeds 50 --rounds 365 --warmup 50 --output_dir results/
 
-# Run with benchmark initialization
-python run_experiments.py --scenario benchmark_init --s_upper 60 --s_step 1 --full_grid --n_seeds 30 --rounds 365 --warmup 50 --output_dir results/
-
-# Run with demand knowledge prior (coarse grid for faster testing)
+# Demand-known prior (coarser grid for faster runs)
 python run_experiments.py --scenario demand_known_prior --s_upper 60 --s_step 5 --n_seeds 30 --rounds 365 --warmup 50 --output_dir results/
+
+# Benchmark init: warm start at centralized optimum
+python run_experiments.py --scenario benchmark_init --s_upper 60 --s_step 1 --full_grid --n_seeds 30 --rounds 365 --warmup 50 --output_dir results/
 ```
 
-## Available Scenarios
+| Argument       | Description                                      |
+|----------------|--------------------------------------------------|
+| `--scenario`   | `baseline`, `demand_known_prior`, or `benchmark_init` |
+| `--s_lower`    | Action space lower bound (default: 0)            |
+| `--s_upper`    | Action space upper bound (required)               |
+| `--s_step`     | Action grid step (default: 1)                     |
+| `--full_grid`  | Use all 5×5 algorithm pairs; otherwise subset    |
+| `--n_seeds`    | Number of random seeds per treatment              |
+| `--rounds`     | Simulation rounds per run                         |
+| `--warmup`     | Warmup rounds before convergence metrics          |
+| `--output_dir` | Directory for all outputs (required)              |
 
-| Scenario | Description |
-|----------|-------------|
-| `baseline` | Random init, no prior knowledge |
-| `demand_known_prior` | Prior knowledge from demand distribution |
-| `benchmark_init` | Warm start at centralized optimum |
+Outputs are written under `output_dir/<scenario>/s<s_lower>-<s_upper>-<s_step>/full` or `subset`, and include `summary.csv`, `runs.csv`, `benchmarks.csv`, `treatments.jsonl`, and `figures/`.
 
-## Treatment Parameters
+### 2. Master (full factorial) experiment (`master_experiment.py`)
 
-### Initialization (`init_mode`)
-- `random` (default): Cold start with zero/uniform priors
-- `benchmark`: Warm start with pseudo-counts at centralized optimum
-
-### Prior Knowledge (`prior_knowledge`)
-- `none` (default): No prior knowledge
-- `demand_known`: Initialize priors using offline Monte Carlo estimates assuming known demand distribution
-
-### Cooperation Mode (`cooperation_mode`)
-Controls how agents' rewards are computed from costs H1 (retailer) and H2 (supplier):
-
-| Mode | Retailer Reward | Supplier Reward | Description |
-|------|----------------|-----------------|-------------|
-| `competitive` (default) | r1 = -H1 | r2 = -H2 | Each agent optimizes own local cost |
-| `cooperative` | r1 = -(H1+H2) | r2 = -(H1+H2) | Both agents optimize joint system cost |
-| `partial` | r1 = -(H1+β·H2) | r2 = -(H2+β·H1) | Partial internalization of other's cost (β ∈ [0,1]) |
-
-**Beta parameter** (`cooperation_beta`): For `partial` mode, controls degree of cost internalization
-- β = 0.0: equivalent to competitive
-- β = 0.5: equal weight to own and other's cost
-- β = 1.0: maximum internalization (approaches cooperative)
-
-**Note**: Payoff matrices, Nash equilibria, and prior rewards are computed based on the cooperation mode, ensuring consistency between learning signals and equilibrium analysis.
-
-### Action Grid
-- Action space is defined by: `s_lower`, `s_upper`, `s_step`
-- Default: 0 to 60 with step 1 (61 actions)
-- Example: `s_lower=0, s_upper=40, s_step=5` gives actions [0, 5, 10, 15, 20, 25, 30, 35, 40]
-
-## Output Files
-
-All outputs are saved to `output_dir` (default: `results/`):
-
-| File | Description |
-|------|-------------|
-| `summary.csv` | Treatment-level aggregates across seeds |
-| `runs.csv` | Per-seed metrics with outcome classification |
-| `benchmarks.csv` | Centralized optimum and Nash equilibrium counts |
-| `treatments.jsonl` | Full treatment config dictionaries |
-| `figures/` | All generated plots |
-
-### Key Metrics in `runs.csv`
-- `s1_mode`, `s2_mode`: Final converged action pair
-- `converged_to_central`: Boolean, mode equals centralized optimum
-- `converged_to_ne`: Boolean/None, mode is a Nash equilibrium (None if no pure NE exists)
-- `delta1`, `delta2`: Deviation incentives (≈0 at Nash equilibrium)
-- `distance_to_central`: L1 distance to centralized optimum
-- `cooperation_mode`, `cooperation_beta`: Cooperation settings for this run
-
-### Key Metrics in `summary.csv`
-- `converged_to_central_rate`, `converged_to_ne_rate`: Rates across seeds
-- `ne_exists`: Boolean, whether pure Nash equilibria exist for this treatment
-- `ne_count`: Number of pure Nash equilibria
-- `delta1_mean`, `delta2_mean`: Average deviation incentives among converged runs
-- `cooperation_mode`, `cooperation_beta`: Cooperation settings for this treatment
-
-## Nash Equilibrium Computation
-
-The `centralsolver` module computes:
-1. **Cost matrices**: H1(s1,s2), H2(s1,s2), Htot(s1,s2) via Monte Carlo
-2. **Payoff matrices**: J1, J2 based on cooperation mode (e.g., J1=H1+β·H2 for partial)
-3. **Best responses**: BR1(s2) = argmin J1(·,s2), BR2(s1) = argmin J2(s1,·)
-4. **Pure Nash equilibria**: (s1,s2) where s1 ∈ BR1(s2) and s2 ∈ BR2(s1)
-
-Results are cached by `config.game_key()` (includes cooperation_mode and beta) for efficiency.
-
-## Plots
-
-| Plot | Description |
-|------|-------------|
-| `learning_curves_all.png` | Mean total cost over time by algorithm pair |
-| `convergence_comparison.png` | Convergence rates and times |
-| `regret_comparison.png` | Total regret by treatment |
-| `final_action_scatter.png` | Final (s1,s2) pairs with central optimum and NE overlay |
-| `algorithm_heatmaps.png` | 5×5 heatmaps for regret, convergence, NE/central rates |
-| `best_response_curves.png` | BR1/BR2 correspondences with NE intersections |
-| `ne_classification_comparison.png` | Outcome classification rates |
-| `deviation_incentives.png` | δ1, δ2 by treatment (≈0 = Nash stable) |
-
-## Agent Types
-
-| Type | Algorithm |
-|------|-----------|
-| `greedy` | ε-greedy with decaying exploration |
-| `ucb` | UCB1 with optimism bonus |
-| `thompson` | Thompson Sampling (Normal-Inverse-Gamma) |
-| `exp3` | Exponential weights (adversarial) |
-| `etc` | Explore-Then-Commit |
-
-## Example: Treatment Sweep
-
-```python
-from experiment_runner import create_treatment_grid, run_experiment_grid
-from simulation.config import ExperimentConfig
-
-# Create 5×5 algorithm grid with specific settings
-treatments = create_treatment_grid(
-    full_grid=True,
-    s_lower=0,
-    s_upper=60,
-    s_step=1,
-    init_mode="random",
-    cooperation_mode="competitive",
-)
-
-results = run_experiment_grid(
-    treatments=treatments,
-    base_config=ExperimentConfig(rounds=365, warmup=50),
-    n_seeds=50,
-    output_dir="results_sweep",
-)
-```
-
-## Master Experiment
-
-Run nested factorial design across all treatment dimensions:
+Sweep all treatment dimensions in one run: algorithm pairs, grid size, prior knowledge, init mode, and cooperation mode (including partial with several β values). Uses parallel workers.
 
 ```bash
 python master_experiment.py --n_seeds 100 --rounds 365 --warmup 50 --max_workers 8 --output_dir results_master
 ```
 
-This creates treatments varying:
-- Algorithm pairs (5×5 = 25 combinations)
-- Grid sizes (coarse: 41 actions, medium: 61, fine: 81)
-- Prior knowledge (none/demand_known)
-- Initialization modes (random/benchmark) - nested within prior_knowledge
-- Cooperation modes (competitive/cooperative/partial with β ∈ {0.25, 0.5, 0.75})
+| Argument        | Default        | Description                    |
+|----------------|----------------|--------------------------------|
+| `--n_seeds`    | 100            | Seeds per treatment            |
+| `--rounds`     | 365            | Rounds per run                 |
+| `--warmup`     | 50             | Warmup rounds                  |
+| `--max_workers`| 4              | Parallel processes             |
+| `--output_dir` | results_master | Output directory               |
+| `--conv_window`| 50             | Convergence detection window   |
+| `--conv_threshold` | 0.9        | Convergence stability threshold|
 
-**Nested Design (no redundancy):**
-- `prior_knowledge="demand_known"` → always uses `init_mode="random"` (prior handles initialization)
-- `prior_knowledge="none"` → tests both `init_mode="random"` and `init_mode="benchmark"`
+**Design:** 25 algorithm pairs × 3 grid sizes × 2 prior knowledge × 2 init modes × 5 cooperation settings (competitive, cooperative, partial β=0.25/0.5/0.75) → **1,500 treatments**. With 100 seeds, that is 150,000 runs. Runtime depends on hardware (e.g. ~10–30 minutes with 8 workers).
 
-Total: 1,125 treatments × 100 seeds = 112,500 runs (~10-15 minutes)
+### 3. Analysis of results (`analyze_results.py`)
 
-## Reproducibility
+After running experiments (especially the master experiment), generate reports, plots, and summary statistics from the saved CSVs.
 
-- All RNG is seeded: `demand_rng` (demand draws), `algo_rng` (Thompson), Mesa's `self.random` (exploration)
-- Benchmark and Nash computations are cached by config key
-- Treatment configs are saved to `treatments.jsonl`
+```bash
+python analyze_results.py --results_dir results_master --output_dir analysis_output
+```
+
+| Argument        | Default          | Description                    |
+|----------------|------------------|--------------------------------|
+| `--results_dir`| results_master   | Directory containing experiment outputs |
+| `--output_dir` | analysis_output  | Where to write analysis outputs |
+
+This produces convergence overviews, speed and solution-quality plots, mechanism-effect plots, algorithm deep-dive, summary dashboard, and a text report (`detailed_analysis_report.txt`).
+
+---
+
+## Where Results Are Saved
+
+- **`run_experiments.py`**  
+  - Path: `<output_dir>/<scenario>/s<s_lower>-<s_upper>-<s_step>/full` or `subset`  
+  - Example: `results/baseline/s0-60-1/full/`
+
+- **`master_experiment.py`**  
+  - Path: whatever you pass as `--output_dir` (e.g. `results_master/`).
+
+In both cases the directory contains:
+
+| File / folder   | Description |
+|-----------------|-------------|
+| `summary.csv`   | One row per treatment; aggregate metrics across seeds |
+| `runs.csv`      | One row per (treatment, seed); per-run metrics |
+| `benchmarks.csv`| Centralized optimum and Nash counts per treatment |
+| `treatments.jsonl` | One JSON object per treatment (full config) |
+| `figures/`      | Plots from the experiment runner (e.g. learning curves, heatmaps) |
+| `metadata.json` | (Master only) Experiment config and parameter ranges |
+
+Analysis outputs from `analyze_results.py` go to `--output_dir` (e.g. `analysis_output/`) and include PNGs and `detailed_analysis_report.txt`.
+
+---
+
+## How to Reproduce Results
+
+1. **Same environment**  
+   Use Python 3.8+ and install exact dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. **Same commands**  
+   Re-run the same script with the same arguments. Example for the master experiment:
+   ```bash
+   python master_experiment.py --n_seeds 100 --rounds 365 --warmup 50 --max_workers 8 --output_dir results_master
+   ```
+
+3. **Seeds**  
+   Seeds are fixed: `run_experiments.py` and `master_experiment.py` use `seeds = list(range(n_seeds))` (e.g. 0..99 for `--n_seeds 100`). So the same `n_seeds` yields the same sequence of RNG seeds.
+
+4. **Caching**  
+   Centralized optimum and Nash equilibrium (and related payoff) computations are cached by config key (e.g. `config.benchmark_key()`, `config.game_key()`). Same config → same cache → same benchmarks across runs.
+
+5. **Reproducing analysis**  
+   After reproducing the experiment outputs, run:
+   ```bash
+   python analyze_results.py --results_dir results_master --output_dir analysis_output
+   ```
+   Same inputs produce the same analysis outputs.
+
+---
+
+## Treatment Variables
+
+These are the dimensions that define a *treatment* (one configuration of the simulation).
+
+### 1. Algorithm pair (`agent_retailer`, `agent_supplier`)
+
+Each stage uses one of five bandit algorithms:
+
+| Algorithm  | Description |
+|-----------|-------------|
+| `greedy`  | ε-greedy with decaying exploration |
+| `ucb`     | UCB1 with optimism bonus |
+| `thompson`| Thompson Sampling (Normal-Inverse-Gamma) |
+| `exp3`    | Exponential weights (adversarial) |
+| `etc`     | Explore-Then-Commit |
+
+There are 25 pairs (5×5) when using the full grid.
+
+### 2. Action grid (`s_lower`, `s_upper`, `s_step`)
+
+Discrete base-stock levels. Actions are `s_lower, s_lower+s_step, ..., s_upper`.  
+Example: `s_lower=0`, `s_upper=40`, `s_step=1` → 41 actions. In the master experiment, “coarse” / “medium” / “fine” map to 41 / 61 / 81 actions.
+
+### 3. Prior knowledge (`prior_knowledge`)
+
+- **`none`** (default): No prior; agents start without demand knowledge.
+- **`demand_known`**: Priors are initialized from offline Monte Carlo estimates assuming the demand distribution is known.
+
+### 4. Initialization mode (`init_mode`)
+
+- **`random`** (default): Cold start; zero/uniform-style priors.
+- **`benchmark`**: Warm start with pseudo-counts at the centralized optimum (s1*, s2*).
+
+In the master experiment, all combinations of `prior_knowledge` × `init_mode` are run (full factorial).
+
+### 5. Cooperation mode (`cooperation_mode`, `cooperation_beta`)
+
+How rewards are derived from costs H1 (retailer) and H2 (supplier):
+
+| Mode | Retailer reward | Supplier reward |
+|------|-----------------|-----------------|
+| `competitive` | r1 = −H1 | r2 = −H2 |
+| `cooperative` | r1 = −(H1+H2) | r2 = −(H1+H2) |
+| `partial`     | r1 = −(H1+β·H2) | r2 = −(H2+β·H1) |
+
+For `partial`, `cooperation_beta` (β) is the weight on the other’s cost (0 = competitive, 1 = full internalization). The master experiment uses β ∈ {0.25, 0.5, 0.75}.
+
+Payoff matrices, Nash equilibria, and prior rewards are computed consistently with the chosen cooperation mode.
+
+---
+
+## Output Files & Metrics
+
+### `summary.csv` (per treatment)
+
+- `converged_to_central_rate`, `converged_to_ne_rate`: Fraction of seeds that converged to central optimum or to a Nash equilibrium.
+- `both_convergence_rate`: Fraction of seeds where both agents converged.
+- `ne_exists`, `ne_count`: Whether a pure Nash exists and how many.
+- `delta1_mean`, `delta2_mean`: Average deviation incentives (≈0 at Nash).
+- Treatment identifiers: `agent_retailer`, `agent_supplier`, `init_mode`, `prior_knowledge`, `cooperation_mode`, `cooperation_beta`, grid params.
+
+### `runs.csv` (per treatment × seed)
+
+- `s1_mode`, `s2_mode`: Final converged action pair.
+- `converged_to_central`, `converged_to_ne`: Boolean (or missing if no pure NE).
+- `delta1`, `delta2`: Deviation incentives for that run.
+- `distance_to_central`: L1 distance to centralized optimum.
+- `s1_conv_time`, `s2_conv_time`: Round at which each agent converged (if applicable).
+
+### Plots (from experiment runner)
+
+In `figures/`: e.g. learning curves, convergence comparison, regret, final-action scatter, algorithm heatmaps, best-response curves, deviation incentives. Exact set depends on the runner.
+
+### Plots from `analyze_results.py`
+
+In the analysis `--output_dir`: convergence overview, convergence speed, by grid size, outcome by prior/init, solution quality, mechanism effects, algorithm deep-dive, summary dashboard.
+
+---
+
+## Project Structure
+
+```
+serial-supply-chain/
+├── README.md
+├── requirements.txt
+├── app.py                 # Optional Mesa+Solara visualization
+├── run_experiments.py     # Scenario-based experiments
+├── master_experiment.py   # Full factorial experiment (parallel)
+├── experiment_runner.py   # Grid runner and treatment execution
+├── analyze_results.py     # Post-hoc analysis and reporting
+├── simulation/
+│   ├── config.py         # ExperimentConfig, defaults
+│   ├── model.py          # TwoStageSupplyChainModel (Mesa)
+│   └── agents.py         # Bandit agents (greedy, UCB, Thompson, etc.)
+└── analysis/
+    ├── centralsolver.py  # Centralized optimum, Nash, payoff matrices
+    ├── metrics.py        # Convergence and run metrics
+    └── plotting.py      # Plot generation for experiment runner
+```
+
+---
+
+## Optional: Interactive Visualization
+
+You can run a single simulation in the browser with sliders for parameters:
+
+```bash
+mesa runserver
+```
+
+Then open the Solara-based UI (URL shown in the terminal). This uses `app.py` and the same `simulation` package. It is for exploration only and does not replace the batch experiments above.
+
+---
+
+## Reproducibility Summary
+
+- **RNG:** Demand, Thompson Sampling, and Mesa’s random are all seeded; seeds are deterministic from the seed index.
+- **Benchmarks:** Centralized optimum and Nash (and payoffs) are cached by config key.
+- **Config:** Full treatment configs are in `treatments.jsonl`; master runs also write `metadata.json`.
+- **Versions:** Use `requirements.txt` and the same Python version for reproducible runs.
