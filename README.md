@@ -48,50 +48,19 @@ A Mesa-based simulation of a 2-stage serial supply chain where bandit agents (re
 
 ### Verify Installation
 
-Run a short scenario to confirm everything works:
+Run a short experiment to confirm everything works:
 
 ```bash
-python run_experiments.py --scenario baseline --s_upper 60 --s_step 5 --n_seeds 5 --rounds 100 --warmup 20 --output_dir results/
+python master_experiment.py --n_seeds 5 --rounds 100 --warmup 20 --output_dir results_test
 ```
 
-You should see progress output and CSV files under `results/`.
+You should see progress output and CSV files under `results_test/`.
 
 ---
 
 ## How to Run the Code
 
-There are three main entry points.
-
-### 1. Scenario-based experiments (`run_experiments.py`)
-
-Run predefined scenarios (baseline, demand-known prior, benchmark init) with a chosen action grid and seed count. Use this for quick or scenario-focused runs.
-
-```bash
-# Baseline: random init, no prior (full 5×5 algorithm grid)
-python run_experiments.py --scenario baseline --s_upper 60 --s_step 1 --full_grid --n_seeds 50 --rounds 365 --warmup 50 --output_dir results/
-
-# Demand-known prior (coarser grid for faster runs)
-python run_experiments.py --scenario demand_known_prior --s_upper 60 --s_step 5 --n_seeds 30 --rounds 365 --warmup 50 --output_dir results/
-
-# Benchmark init: warm start at centralized optimum
-python run_experiments.py --scenario benchmark_init --s_upper 60 --s_step 1 --full_grid --n_seeds 30 --rounds 365 --warmup 50 --output_dir results/
-```
-
-| Argument       | Description                                      |
-|----------------|--------------------------------------------------|
-| `--scenario`   | `baseline`, `demand_known_prior`, or `benchmark_init` |
-| `--s_lower`    | Action space lower bound (default: 0)            |
-| `--s_upper`    | Action space upper bound (required)               |
-| `--s_step`     | Action grid step (default: 1)                     |
-| `--full_grid`  | Use all 5×5 algorithm pairs; otherwise subset    |
-| `--n_seeds`    | Number of random seeds per treatment              |
-| `--rounds`     | Simulation rounds per run                         |
-| `--warmup`     | Warmup rounds before convergence metrics          |
-| `--output_dir` | Directory for all outputs (required)              |
-
-Outputs are written under `output_dir/<scenario>/s<s_lower>-<s_upper>-<s_step>/full` or `subset`, and include `summary.csv`, `runs.csv`, `benchmarks.csv`, `treatments.jsonl`, and `figures/`.
-
-### 2. Master (full factorial) experiment (`master_experiment.py`)
+### Master (full factorial) experiment (`master_experiment.py`)
 
 Sweep all treatment dimensions in one run: algorithm pairs, grid size, prior knowledge, init mode, and cooperation mode (including partial with several β values). Uses parallel workers.
 
@@ -111,33 +80,11 @@ python master_experiment.py --n_seeds 100 --rounds 365 --warmup 50 --max_workers
 
 **Design:** 25 algorithm pairs × 3 grid sizes × 2 prior knowledge × 2 init modes × 5 cooperation settings (competitive, cooperative, partial β=0.25/0.5/0.75) → **1,500 treatments**. With 100 seeds, that is 150,000 runs. Runtime depends on hardware (e.g. ~10–30 minutes with 8 workers).
 
-### 3. Analysis of results (`analyze_results.py`)
-
-After running experiments (especially the master experiment), generate reports, plots, and summary statistics from the saved CSVs.
-
-```bash
-python analyze_results.py --results_dir results_master --output_dir analysis_output
-```
-
-| Argument        | Default          | Description                    |
-|----------------|------------------|--------------------------------|
-| `--results_dir`| results_master   | Directory containing experiment outputs |
-| `--output_dir` | analysis_output  | Where to write analysis outputs |
-
-This produces convergence overviews, speed and solution-quality plots, mechanism-effect plots, algorithm deep-dive, summary dashboard, and a text report (`detailed_analysis_report.txt`).
-
 ---
 
 ## Where Results Are Saved
 
-- **`run_experiments.py`**  
-  - Path: `<output_dir>/<scenario>/s<s_lower>-<s_upper>-<s_step>/full` or `subset`  
-  - Example: `results/baseline/s0-60-1/full/`
-
-- **`master_experiment.py`**  
-  - Path: whatever you pass as `--output_dir` (e.g. `results_master/`).
-
-In both cases the directory contains:
+Results are written to the `--output_dir` (e.g. `results_master/`). The directory contains:
 
 | File / folder   | Description |
 |-----------------|-------------|
@@ -145,10 +92,8 @@ In both cases the directory contains:
 | `runs.csv`      | One row per (treatment, seed); per-run metrics |
 | `benchmarks.csv`| Centralized optimum and Nash counts per treatment |
 | `treatments.jsonl` | One JSON object per treatment (full config) |
-| `figures/`      | Plots from the experiment runner (e.g. learning curves, heatmaps) |
-| `metadata.json` | (Master only) Experiment config and parameter ranges |
-
-Analysis outputs from `analyze_results.py` go to `--output_dir` (e.g. `analysis_output/`) and include PNGs and `detailed_analysis_report.txt`.
+| `figures/`      | Plots (convergence heatmaps, regret, factor importance, etc.) |
+| `metadata.json` | Experiment config and parameter ranges |
 
 ---
 
@@ -166,18 +111,11 @@ Analysis outputs from `analyze_results.py` go to `--output_dir` (e.g. `analysis_
    python master_experiment.py --n_seeds 100 --rounds 365 --warmup 50 --max_workers 8 --output_dir results_master
    ```
 
-3. **Seeds**  
-   Seeds are fixed: `run_experiments.py` and `master_experiment.py` use `seeds = list(range(n_seeds))` (e.g. 0..99 for `--n_seeds 100`). So the same `n_seeds` yields the same sequence of RNG seeds.
+3. **Seeds**
+   Seeds are fixed: `master_experiment.py` uses `seeds = list(range(n_seeds))` (e.g. 0..99 for `--n_seeds 100`). So the same `n_seeds` yields the same sequence of RNG seeds.
 
 4. **Caching**  
    Centralized optimum and Nash equilibrium (and related payoff) computations are cached by config key (e.g. `config.benchmark_key()`, `config.game_key()`). Same config → same cache → same benchmarks across runs.
-
-5. **Reproducing analysis**  
-   After reproducing the experiment outputs, run:
-   ```bash
-   python analyze_results.py --results_dir results_master --output_dir analysis_output
-   ```
-   Same inputs produce the same analysis outputs.
 
 ---
 
@@ -250,13 +188,9 @@ Payoff matrices, Nash equilibria, and prior rewards are computed consistently wi
 - `distance_to_central`: L1 distance to centralized optimum.
 - `s1_conv_time`, `s2_conv_time`: Round at which each agent converged (if applicable).
 
-### Plots (from experiment runner)
+### Plots
 
-In `figures/`: e.g. learning curves, convergence comparison, regret, final-action scatter, algorithm heatmaps, best-response curves, deviation incentives. Exact set depends on the runner.
-
-### Plots from `analyze_results.py`
-
-In the analysis `--output_dir`: convergence overview, convergence speed, by grid size, outcome by prior/init, solution quality, mechanism effects, algorithm deep-dive, summary dashboard.
+Generated in `figures/` inside the output directory. Includes convergence heatmaps by algorithm pair, regret heatmaps, convergence by grid size, convergence time, convergence by prior/init, convergence by cooperation mode, solution quality, time distribution, and factor importance.
 
 ---
 
@@ -267,12 +201,12 @@ serial-supply-chain/
 ├── README.md
 ├── requirements.txt
 ├── app.py                 # Optional Mesa+Solara visualization
-├── run_experiments.py     # Scenario-based experiments
 ├── master_experiment.py   # Full factorial experiment (parallel)
 ├── experiment_runner.py   # Grid runner and treatment execution
-├── analyze_results.py     # Post-hoc analysis and reporting
+├── generate_latex_charts.py # LaTeX chart generation for papers
 ├── simulation/
 │   ├── config.py         # ExperimentConfig, defaults
+│   ├── environment.py    # Shared supply chain step function
 │   ├── model.py          # TwoStageSupplyChainModel (Mesa)
 │   └── agents.py         # Bandit agents (greedy, UCB, Thompson, etc.)
 └── analysis/
@@ -288,16 +222,16 @@ serial-supply-chain/
 You can run a single simulation in the browser with sliders for parameters:
 
 ```bash
-mesa runserver
+solara run app.py
 ```
 
-Then open the Solara-based UI (URL shown in the terminal). This uses `app.py` and the same `simulation` package. It is for exploration only and does not replace the batch experiments above.
+Then open the URL shown in the terminal. This uses `app.py` (Mesa 3 + Solara) and the same `simulation` package. It is for exploration only and does not replace the batch experiment above.
 
 ---
 
 ## Reproducibility Summary
 
-- **RNG:** Demand, Thompson Sampling, and Mesa’s random are all seeded; seeds are deterministic from the seed index.
+- **RNG:** All randomness flows through Mesa’s `model.rng` (numpy `default_rng`), seeded per run.
 - **Benchmarks:** Centralized optimum and Nash (and payoffs) are cached by config key.
 - **Config:** Full treatment configs are in `treatments.jsonl`; master runs also write `metadata.json`.
 - **Versions:** Use `requirements.txt` and the same Python version for reproducible runs.
