@@ -1,3 +1,5 @@
+Link to Repository: https://github.com/jonzz02/serial-supply-chain.git
+
 # Serial Supply Chain Coordination Simulation
 
 A Mesa-based simulation of a 2-stage serial supply chain where bandit agents (retailer stage 1, supplier stage 2) learn discrete base-stock levels. The project studies whether and how agents converge, to what solutions (Nash equilibria, centralized optimum), and which mechanisms (cooperation mode, prior knowledge, initialization, learning algorithms) influence outcomes.
