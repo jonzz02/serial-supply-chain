@@ -203,7 +203,6 @@ serial-supply-chain/
 ├── app.py                 # Optional Mesa+Solara visualization
 ├── master_experiment.py   # Full factorial experiment (parallel)
 ├── experiment_runner.py   # Grid runner and treatment execution
-├── generate_latex_charts.py # LaTeX chart generation for papers
 ├── simulation/
 │   ├── config.py         # ExperimentConfig, defaults
 │   ├── environment.py    # Shared supply chain step function
