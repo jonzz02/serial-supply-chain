@@ -11,7 +11,6 @@ class BanditAgent(Agent):
         self.n_actions = len(self.action_space)
         self.counts = np.zeros(self.n_actions, dtype=int)
         self.average_reward = np.zeros(self.n_actions)
-        self.M2 = np.zeros(self.n_actions)
         self.action_idx = self.action = None
         self.reward = self.reward_cum = 0.0
 
@@ -23,7 +22,6 @@ class BanditAgent(Agent):
         self.counts[a_idx] = n
         old_mean = self.average_reward[a_idx]
         self.average_reward[a_idx] += (r - old_mean) / n
-        self.M2[a_idx] += (r - old_mean) * (self.average_reward[a_idx] - old_mean)
 
     def select_action(self):
         raise NotImplementedError
@@ -72,18 +70,13 @@ class UcbAgent(BanditAgent):
         self.total_plays += 1
 
 
-class ThompsonAgent(Agent):
+class ThompsonAgent(BanditAgent):
     def __init__(self, model, role: str):
-        super().__init__(model)
-        self.role = role
-        self.action_space = model.config.action_space()
-        self.n_actions = len(self.action_space)
+        super().__init__(model, role)
         self.mu = np.zeros(self.n_actions)
         self.kappa = np.ones(self.n_actions)
         self.alpha_param = np.ones(self.n_actions)
         self.beta_param = np.ones(self.n_actions)
-        self.action_idx = self.action = None
-        self.reward = self.reward_cum = 0.0
 
     def select_action(self):
         sampled = np.array([
@@ -102,20 +95,15 @@ class ThompsonAgent(Agent):
         self.beta_param[a] += 0.5 * kappa_old * (r - mu_old)**2 / self.kappa[a]
 
 
-class Exp3Agent(Agent):
+class Exp3Agent(BanditAgent):
     def __init__(self, model, role: str):
-        super().__init__(model)
-        self.role = role
-        self.action_space = model.config.action_space()
-        self.n_actions = len(self.action_space)
-        self.gamma = model.config.exp3_gamma
+        super().__init__(model, role)
+        self.gamma = self._config.exp3_gamma
         self.weights = np.ones(self.n_actions)
         self._probs = np.ones(self.n_actions) / self.n_actions
-        self.action_idx = self.action = None
-        self.reward = self.reward_cum = 0.0
         self.r_min = float("inf")
         self.r_max = float("-inf")
-        self._freeze_t = min(50, getattr(model.config, "rounds", 50))
+        self._freeze_t = min(50, self._config.rounds)
 
     def select_action(self):
         w_sum = self.weights.sum()

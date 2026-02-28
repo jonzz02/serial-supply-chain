@@ -1,5 +1,6 @@
 import numpy as np
 from typing import Tuple, Dict, Any
+from simulation.environment import env_step as _env_step
 
 _benchmark_cache, _payoff_cache, _nash_cache, _prior_cache = {}, {}, {}, {}
 
@@ -11,23 +12,6 @@ def _effective_costs(H1: float, H2: float, cooperation_mode: str, beta: float):
     if cooperation_mode == "partial":
         return H1 + beta * H2, H2 + beta * H1
     return H1, H2  # competitive
-
-
-def _env_step(rng, I1, I2, B1, B2, U1p, U2p, s1, s2, lam, h1, h2, p_bo, alpha):
-    I1 += U1p
-    I2 += U2p
-    O1, O2 = max(0, s1 - (I1 - B1)), max(0, s2 - (I2 - B2))
-    ship = min(I2, B2 + O1)
-    I2 -= ship
-    B2 = B2 + O1 - ship
-    U1, U2 = ship, O2
-    D = int(rng.poisson(lam))
-    sales = min(I1, B1 + D)
-    I1 -= sales
-    B1 = B1 + D - sales
-    H1 = (h1 + h2) * I1 + alpha * p_bo * B1
-    H2 = h2 * (I2 + U1) + (1.0 - alpha) * p_bo * B1
-    return I1, I2, B1, B2, U1, U2, float(H1 + H2), float(H1), float(H2)
 
 
 def _estimate_costs(s1, s2, seed, rounds, warmup, lam, h1, h2, p_bo, alpha):

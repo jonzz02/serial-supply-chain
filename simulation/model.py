@@ -3,6 +3,7 @@ from mesa import Model
 from mesa.datacollection import DataCollector
 from .agents import create_agent
 from .config import ExperimentConfig, DEFAULT_CONFIG
+from .environment import env_step as _env_step
 
 
 class TwoStageSupplyChainModel(Model):
@@ -41,34 +42,14 @@ class TwoStageSupplyChainModel(Model):
 
     def env_step(self, s1_loc: int, s2_loc: int):
         cfg = self.config
-        I1, I2, B1, B2 = self.I1, self.I2, self.B1, self.B2
-
-        I1 += self.U1_prev
-        I2 += self.U2_prev
-
-        O1 = max(0, s1_loc - (I1 - B1))
-        O2 = max(0, s2_loc - (I2 - B2))
-
-        ship = min(I2, B2 + O1)
-        I2 -= ship
-        B2 = B2 + O1 - ship
-        U1, U2 = ship, O2
-
-        D = int(self.rng.poisson(cfg.lam))
-        sales = min(I1, B1 + D)
-        I1 -= sales
-        B1 = B1 + D - sales
-
-        H1 = (cfg.h1 + cfg.h2) * I1 + cfg.alpha * cfg.p_bo * B1
-        H2 = cfg.h2 * (I2 + U1) + (1.0 - cfg.alpha) * cfg.p_bo * B1
-
-        self.I1, self.I2, self.B1, self.B2 = I1, I2, B1, B2
-        self.U1_prev, self.U2_prev = U1, U2
-        self.last_total_cost = float(H1 + H2)
-        self.cost_retailer, self.cost_supplier = float(H1), float(H2)
+        self.I1, self.I2, self.B1, self.B2, self.U1_prev, self.U2_prev, D, H1, H2 = _env_step(
+            self.rng, self.I1, self.I2, self.B1, self.B2, self.U1_prev, self.U2_prev,
+            s1_loc, s2_loc, cfg.lam, cfg.h1, cfg.h2, cfg.p_bo, cfg.alpha
+        )
+        self.last_total_cost = H1 + H2
+        self.cost_retailer, self.cost_supplier = H1, H2
         self.last_demand = D
-
-        return float(H1), float(H2)
+        return H1, H2
 
     def step(self):
         cfg = self.config

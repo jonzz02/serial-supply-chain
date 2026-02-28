@@ -10,6 +10,7 @@ from dataclasses import asdict
 
 from experiment_runner import TreatmentConfig, run_treatment, AVAILABLE_AGENTS
 from simulation.config import ExperimentConfig
+from analysis.plotting import generate_all_charts
 
 
 USE_FULL_ALGORITHM_GRID = True
@@ -243,7 +244,10 @@ def run_master_experiment(
         print(f"  - benchmarks.csv: {len(bench_df)} benchmarks")
         print(f"  - treatments.jsonl: {len(treatments)} treatments")
         print(f"  - metadata.json: experiment configuration")
-    
+
+    print(f"\nGenerating charts...")
+    generate_all_charts(results_dir=output_dir, output_dir=os.path.join(output_dir, "figures"))
+
     return {
         "summary_df": summary_df,
         "run_df": run_df,
